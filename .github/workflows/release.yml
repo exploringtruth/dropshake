@@ -14,7 +14,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build app and DMG
         run: VERSION="${GITHUB_REF_NAME#v}" bash ./scripts/build-dmg.sh
+      - name: Create stable download name
+        run: cp "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" --generate-notes --title "Dropshake $GITHUB_REF_NAME"
+        run: gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg --generate-notes --title "Dropshake $GITHUB_REF_NAME"
