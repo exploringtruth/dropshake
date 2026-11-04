@@ -11,21 +11,7 @@ struct DropshakeApp: App {
         MenuBarExtra("Dropshake", systemImage: "tray.and.arrow.down") {
             Button("Open Shelf") { runtime.showShelf() }
                 .keyboardShortcut("o")
-            Button("New Shelf") { runtime.createShelf() }
-            Menu("Switch Shelf") {
-                ForEach(runtime.shelf.shelves) { shelf in
-                    Button {
-                        runtime.selectShelf(shelf.id)
-                    } label: {
-                        if shelf.id == runtime.shelf.activeShelfID {
-                            Label(shelf.name, systemImage: "checkmark")
-                        } else {
-                            Text(shelf.name)
-                        }
-                    }
-                }
-            }
-            Button("Capture Clipboard") { runtime.captureClipboard() }
+            Button("Add Clipboard Contents") { runtime.captureClipboard() }
             Button("Hide Shelf") { runtime.hideShelf() }
             Button("Clear Shelf") { runtime.shelf.clear() }
             Divider()
@@ -56,7 +42,6 @@ final class DropshakeRuntime: ObservableObject {
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
 
         shakeDetector.onShake = { [weak self, weak shelfWindow] in
-            self?.shelf.createShelf()
             shelfWindow?.show(near: NSEvent.mouseLocation)
         }
         shakeDetector.isEnabled = shakeEnabled
@@ -65,15 +50,6 @@ final class DropshakeRuntime: ObservableObject {
 
     func showShelf() { shelfWindow.show(near: nil) }
     func hideShelf() { shelfWindow.hide() }
-    func createShelf() {
-        shelf.createShelf()
-        shelfWindow.show(near: nil)
-    }
-    func selectShelf(_ id: UUID) {
-        shelf.activate(id)
-        shelfWindow.show(near: nil)
-    }
-
     func captureClipboard() {
         let pasteboard = NSPasteboard.general
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [NSURL] ?? []
@@ -333,19 +309,18 @@ final class ShelfStore: ObservableObject {
             .flatMap { try? decoder.decode([Shelf].self, from: $0) } ?? []
         let migratedItems = defaults.data(forKey: legacyStorageKey)
             .flatMap { try? decoder.decode([ShelfItem].self, from: $0) } ?? []
-        let source = savedShelves.isEmpty ? [Shelf(name: "Shelf", items: migratedItems)] : savedShelves
-        let cleaned = source.map { shelf in
-            let items = shelf.items.compactMap { original -> ShelfItem? in
-                var item = original
-                guard let fileURL = item.resolveFileURL() else { return item.text == nil ? nil : item }
-                return FileManager.default.fileExists(atPath: fileURL.path) ? item : nil
-            }
-            return Shelf(id: shelf.id, name: shelf.name, items: items)
-        }
-        let nonEmpty = cleaned.isEmpty ? [Shelf(name: "Shelf")] : cleaned
-        self.shelves = nonEmpty
         let savedID = defaults.string(forKey: activeShelfKey).flatMap(UUID.init(uuidString:))
-        self.activeShelfID = nonEmpty.first(where: { $0.id == savedID })?.id ?? nonEmpty[0].id
+        let currentShelf = savedShelves.first(where: { $0.id == savedID })
+            ?? savedShelves.first
+            ?? Shelf(name: "Shelf", items: migratedItems)
+        let currentItems = currentShelf.items.compactMap { original -> ShelfItem? in
+            var item = original
+            guard let fileURL = item.resolveFileURL() else { return item.text == nil ? nil : item }
+            return FileManager.default.fileExists(atPath: fileURL.path) ? item : nil
+        }
+        let retainedShelf = Shelf(id: currentShelf.id, name: "Shelf", items: currentItems)
+        self.shelves = [retainedShelf]
+        self.activeShelfID = retainedShelf.id
         save()
     }
 
@@ -382,46 +357,6 @@ final class ShelfStore: ObservableObject {
         save()
     }
 
-    @discardableResult
-    func createShelf() -> UUID {
-        var suffix = max(2, shelves.count + 1)
-        var name = "Shelf \(suffix)"
-        while shelves.contains(where: { $0.name == name }) {
-            suffix += 1
-            name = "Shelf \(suffix)"
-        }
-        let shelf = Shelf(name: name)
-        shelves.append(shelf)
-        activeShelfID = shelf.id
-        save()
-        return shelf.id
-    }
-
-    func activate(_ id: UUID) {
-        guard shelves.contains(where: { $0.id == id }), activeShelfID != id else { return }
-        activeShelfID = id
-        UserDefaults.standard.set(id.uuidString, forKey: activeShelfKey)
-    }
-
-    func renameActiveShelf(_ name: String) {
-        guard let index = activeIndex else { return }
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        shelves[index].name = clean
-        save()
-    }
-
-    func deleteActiveShelf() {
-        guard let index = activeIndex else { return }
-        if shelves.count == 1 {
-            shelves[0] = Shelf(name: "Shelf")
-        } else {
-            shelves.remove(at: index)
-            activeShelfID = shelves[0].id
-        }
-        save()
-    }
-
     private var activeIndex: Int? { shelves.firstIndex(where: { $0.id == activeShelfID }) }
 
     private func save() {
@@ -436,9 +371,6 @@ struct ShelfView: View {
     @ObservedObject var store: ShelfStore
     let onClose: () -> Void
     @State private var isTargeted = false
-    @State private var showingRename = false
-    @State private var showingDeleteConfirmation = false
-    @State private var shelfNameDraft = ""
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectionAnchorID: UUID?
 
@@ -470,21 +402,6 @@ struct ShelfView: View {
             },
             onText: { store.add(text: $0) }
         ))
-        .onChange(of: store.activeShelfID) { _ in
-            selectedItemIDs.removeAll()
-            selectionAnchorID = nil
-        }
-        .alert("Rename Shelf", isPresented: $showingRename) {
-            TextField("Shelf name", text: $shelfNameDraft)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") { store.renameActiveShelf(shelfNameDraft) }
-        }
-        .confirmationDialog("Delete Shelf?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
-            Button("Delete Shelf", role: .destructive) { store.deleteActiveShelf() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the shelf and its saved references. The original files stay where they are.")
-        }
     }
 
     private var header: some View {
@@ -493,7 +410,7 @@ struct ShelfView: View {
                 .help("Drag anywhere across the header to move shelf")
             Image(systemName: "tray.full.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.activeShelfName).font(.headline)
+                Text("Shelf").font(.headline)
                 Text(store.items.isEmpty ? "Your temporary shelf" : "\(store.items.count) item\(store.items.count == 1 ? "" : "s")")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -502,17 +419,6 @@ struct ShelfView: View {
                 Button(action: store.clear) { Image(systemName: "trash") }
                     .buttonStyle(.plain).help("Clear shelf")
             }
-            Menu {
-                Button("Rename Shelf") {
-                    shelfNameDraft = store.activeShelfName
-                    showingRename = true
-                }
-                Button("Delete Shelf", role: .destructive) { showingDeleteConfirmation = true }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .help("Shelf options")
             Button(action: onClose) { Image(systemName: "xmark") }
                 .buttonStyle(.plain).help("Hide shelf")
         }
