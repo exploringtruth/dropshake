@@ -42,6 +42,7 @@ final class DropshakeRuntime: ObservableObject {
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
 
         shakeDetector.onShake = { [weak self, weak shelfWindow] in
+            self?.shelf.clear()
             shelfWindow?.show(near: NSEvent.mouseLocation)
         }
         shakeDetector.isEnabled = shakeEnabled
