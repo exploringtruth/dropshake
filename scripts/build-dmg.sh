@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
-VERSION="${VERSION:-0.2.12}"
+VERSION="${VERSION:-0.2.13}"
 APP_NAME="Dropshake"
 BUILD_DIR="$ROOT/.build"
 APP="$BUILD_DIR/$APP_NAME.app"
@@ -48,22 +48,21 @@ hdiutil attach -readwrite -noverify -noautoopen -mountpoint "$MOUNT_POINT" "$RW_
 
 osascript <<APPLESCRIPT
 tell application "Finder"
-    tell disk "$APP_NAME"
-        open
-        set current view of container window to icon view
-        set toolbar visible of container window to false
-        set statusbar visible of container window to false
-        set bounds of container window to {120, 120, 1100, 800}
-        set iconOptions to icon view options of container window
-        set icon size of iconOptions to 128
-        set arrangement of iconOptions to not arranged
-        set background picture of iconOptions to POSIX file "$MOUNT_POINT/.background/background.png"
-        set position of item "$APP_NAME.app" to {246, 326}
-        set position of item "Applications" to {734, 326}
-        update without registering applications
-        delay 2
-        close container window
-    end tell
+    open (POSIX file "$MOUNT_POINT")
+    delay 1
+    set dmgWindow to front Finder window
+    set current view of dmgWindow to icon view
+    set toolbar visible of dmgWindow to false
+    set statusbar visible of dmgWindow to false
+    set bounds of dmgWindow to {120, 120, 1100, 800}
+    set iconOptions to icon view options of dmgWindow
+    set icon size of iconOptions to 128
+    set arrangement of iconOptions to not arranged
+    set background picture of iconOptions to POSIX file "$MOUNT_POINT/.background/background.png"
+    set position of item "$APP_NAME.app" of dmgWindow to {246, 326}
+    set position of item "Applications" of dmgWindow to {734, 326}
+    delay 2
+    close dmgWindow
 end tell
 APPLESCRIPT
 
