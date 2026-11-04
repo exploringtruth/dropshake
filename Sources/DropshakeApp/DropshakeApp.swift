@@ -130,6 +130,7 @@ final class ShelfWindowController {
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -523,7 +524,7 @@ struct ShelfView: View {
             .buttonStyle(.plain).padding(5).opacity(0.85)
         }
         .onDrag {
-            if let fileURL = item.fileURL { return NSItemProvider(contentsOf: fileURL) ?? NSItemProvider(object: item.name as NSString) }
+            if let fileURL = item.fileURL { return fileDragProvider(for: fileURL) }
             return NSItemProvider(object: (item.text ?? item.name) as NSString)
         }
         .contextMenu {
@@ -547,6 +548,19 @@ struct ShelfView: View {
     private func copyToClipboard(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func fileDragProvider(for fileURL: URL) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerFileRepresentation(
+            forTypeIdentifier: UTType.fileURL.identifier,
+            fileOptions: [.openInPlace],
+            visibility: .all
+        ) { completion in
+            completion(fileURL, true, nil)
+            return nil
+        }
+        return provider
     }
 
     private var footer: some View {
