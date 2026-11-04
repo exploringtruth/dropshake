@@ -1,0 +1,21 @@
+name: Build and publish DMG
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build app and DMG
+        run: ./scripts/build-dmg.sh
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME:-manual}" Dropshake-*.dmg --generate-notes --title "Dropshake ${GITHUB_REF_NAME:-manual}"
