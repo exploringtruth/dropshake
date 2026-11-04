@@ -6,9 +6,10 @@ import UniformTypeIdentifiers
 @main
 struct DropshakeApp: App {
     @StateObject private var runtime = DropshakeRuntime()
+    @State private var isMenuBarExtraInserted = true
 
     var body: some Scene {
-        MenuBarExtra("Dropshake", systemImage: "tray.and.arrow.down") {
+        MenuBarExtra(isInserted: $isMenuBarExtraInserted) {
             Button("Open Shelf") { runtime.showShelf() }
                 .keyboardShortcut("o")
             Button("Add Clipboard Contents") { runtime.captureClipboard() }
@@ -20,9 +21,56 @@ struct DropshakeApp: App {
             }
             Divider()
             Button("Quit Dropshake") { NSApp.terminate(nil) }
+        } label: {
+            Image(nsImage: DropshakeMenuBarIcon.image)
+                .renderingMode(.template)
+                .frame(width: 18, height: 18)
         }
         .menuBarExtraStyle(.menu)
     }
+}
+
+private enum DropshakeMenuBarIcon {
+    static let image: NSImage = {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.white.setStroke()
+
+        let paper = NSBezierPath()
+        paper.lineWidth = 1.35
+        paper.lineCapStyle = .round
+        paper.lineJoinStyle = .round
+        paper.move(to: NSPoint(x: 5.0, y: 5.0))
+        paper.line(to: NSPoint(x: 4.3, y: 11.7))
+        paper.curve(to: NSPoint(x: 5.4, y: 13.2), controlPoint1: NSPoint(x: 4.2, y: 12.7), controlPoint2: NSPoint(x: 4.6, y: 13.1))
+        paper.line(to: NSPoint(x: 10.6, y: 14.5))
+        paper.curve(to: NSPoint(x: 12.2, y: 13.4), controlPoint1: NSPoint(x: 11.6, y: 14.8), controlPoint2: NSPoint(x: 12.1, y: 14.3))
+        paper.line(to: NSPoint(x: 13.5, y: 7.4))
+        paper.line(to: NSPoint(x: 11.0, y: 5.4))
+        paper.close()
+        paper.stroke()
+
+        let foldedCorner = NSBezierPath()
+        foldedCorner.lineWidth = 1.15
+        foldedCorner.lineCapStyle = .round
+        foldedCorner.lineJoinStyle = .round
+        foldedCorner.move(to: NSPoint(x: 11.0, y: 5.4))
+        foldedCorner.line(to: NSPoint(x: 10.5, y: 8.1))
+        foldedCorner.line(to: NSPoint(x: 13.5, y: 7.4))
+        foldedCorner.stroke()
+
+        let outerPortal = NSBezierPath(ovalIn: NSRect(x: 1.4, y: 1.7, width: 15.2, height: 6.7))
+        outerPortal.lineWidth = 1.35
+        outerPortal.stroke()
+        let innerPortal = NSBezierPath(ovalIn: NSRect(x: 3.1, y: 2.9, width: 11.8, height: 4.1))
+        innerPortal.lineWidth = 1.0
+        innerPortal.stroke()
+
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
+    }()
 }
 
 @MainActor
