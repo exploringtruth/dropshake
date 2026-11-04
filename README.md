@@ -7,13 +7,14 @@ Dropshake is an independent project inspired by the general file-shelf workflow.
 ## What works today
 
 - Native SwiftUI shelf window with a menu bar control.
+- Shake the pointer while dragging to reveal a floating shelf beside the cursor.
 - Drop files, folders, links, and plain text onto the shelf.
 - Drag files and folders from the shelf into Finder or another app that accepts file drags; text and links can be dragged out as text.
 - Remove one item or clear the whole shelf.
 - Remember shelf contents across launches. The shelf stores file references; it does not copy or upload the files.
 - Display Finder icons, names, and file types.
 
-The current starter focuses on the dependable shelf workflow. Shake-to-open while a drag is in progress, multiple named shelves, clipboard capture, actions, and configurable shortcuts are future work.
+The current release covers the core shelf workflow. Multiple named shelves, clipboard capture, actions, and configurable global shortcuts are future work.
 
 ## Requirements
 
@@ -28,7 +29,7 @@ The current starter focuses on the dependable shelf workflow. Shake-to-open whil
 swift run
 ```
 
-The app's window is the shelf. Use the Dropshake tray icon in the menu bar to bring it forward, clear its contents, or quit.
+Dropshake runs from the menu bar. Choose **Open Shelf** there, or shake the pointer while dragging with the left mouse button held. The floating shelf stays open until you hide it; dropping files onto it stores references without moving or copying the originals.
 
 ## Build a DMG
 
