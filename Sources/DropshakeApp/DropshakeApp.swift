@@ -135,7 +135,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         panel.becomesKeyOnlyIfNeeded = false
         panel.level = .floating
         panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
+        panel.isMovableByWindowBackground = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -767,6 +767,19 @@ private final class WindowDragView: NSView {
     private var initialWindowOrigin: NSPoint?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let window else { return nil }
+        let pointer = NSEvent.mouseLocation
+        let frame = window.frame
+        let resizeInset: CGFloat = 18
+        if pointer.x <= frame.minX + resizeInset
+            || pointer.x >= frame.maxX - resizeInset
+            || pointer.y >= frame.maxY - resizeInset {
+            return nil
+        }
+        return super.hitTest(point)
+    }
 
     override func mouseDown(with event: NSEvent) {
         initialMouseLocation = NSEvent.mouseLocation
