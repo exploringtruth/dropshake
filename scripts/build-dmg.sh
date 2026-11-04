@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
-VERSION="${VERSION:-0.2.13}"
+VERSION="${VERSION:-0.2.14}"
 APP_NAME="Dropshake"
 BUILD_DIR="$ROOT/.build"
 APP="$BUILD_DIR/$APP_NAME.app"
