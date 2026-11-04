@@ -758,6 +758,10 @@ private enum ShelfResizeEdge {
 
 private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content> {
     private var shelfTrackingArea: NSTrackingArea?
+    private var activeResizeEdge: ShelfResizeEdge?
+    private var hasPushedResizeCursor = false
+    private var resizeStartPoint: NSPoint?
+    private var resizeStartFrame: NSRect?
 
     override func updateTrackingAreas() {
         if let shelfTrackingArea { removeTrackingArea(shelfTrackingArea) }
@@ -772,31 +776,110 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         super.updateTrackingAreas()
     }
 
-    override func mouseEntered(with event: NSEvent) { updateShelfResizeCursor(at: event) }
-    override func mouseMoved(with event: NSEvent) { updateShelfResizeCursor(at: event) }
-    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let windowPoint = convert(point, to: nil)
+        let screenPoint = window?.convertPoint(toScreen: windowPoint) ?? .zero
+        return resizeEdge(at: screenPoint) == nil ? super.hitTest(point) : self
+    }
 
-    private func updateShelfResizeCursor(at event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        let edge: ShelfResizeEdge?
-        let horizontalEdge = point.x <= 20 ? ShelfResizeEdge.left : (point.x >= bounds.maxX - 20 ? .right : nil)
-        let verticalEdge = point.y <= 20 ? ShelfResizeEdge.bottom : (point.y >= bounds.maxY - 20 ? .top : nil)
+    override func mouseEntered(with event: NSEvent) { updateShelfResizeCursor() }
+    override func mouseMoved(with event: NSEvent) { updateShelfResizeCursor() }
+    override func mouseExited(with event: NSEvent) { restoreResizeCursor() }
 
-        switch (horizontalEdge, verticalEdge) {
-        case let (.some(horizontal), .some(vertical)):
-            switch (horizontal, vertical) {
-            case (.left, .top): edge = .topLeft
-            case (.right, .top): edge = .topRight
-            case (.left, .bottom): edge = .bottomLeft
-            default: edge = .bottomRight
-            }
-        case let (.some(horizontal), .none): edge = horizontal
-        case let (.none, .some(vertical)): edge = vertical
-        case (.none, .none): edge = nil
+    override func mouseDown(with event: NSEvent) {
+        guard let window,
+              let edge = resizeEdge(at: NSEvent.mouseLocation) else {
+            super.mouseDown(with: event)
+            return
+        }
+        activeResizeEdge = edge
+        resizeStartPoint = NSEvent.mouseLocation
+        resizeStartFrame = window.frame
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let edge = activeResizeEdge,
+              let startPoint = resizeStartPoint,
+              let startFrame = resizeStartFrame,
+              let window else {
+            super.mouseDragged(with: event)
+            return
         }
 
-        if let edge { shelfResizeCursor(at: edge).set() }
-        else { NSCursor.arrow.set() }
+        let point = NSEvent.mouseLocation
+        let dx = point.x - startPoint.x
+        let dy = point.y - startPoint.y
+        var frame = startFrame
+        let movesLeft: Bool
+        let movesRight: Bool
+        let movesBottom: Bool
+        let movesTop: Bool
+        switch edge {
+        case .left: movesLeft = true; movesRight = false; movesBottom = false; movesTop = false
+        case .right: movesLeft = false; movesRight = true; movesBottom = false; movesTop = false
+        case .bottom: movesLeft = false; movesRight = false; movesBottom = true; movesTop = false
+        case .top: movesLeft = false; movesRight = false; movesBottom = false; movesTop = true
+        case .topLeft: movesLeft = true; movesRight = false; movesBottom = false; movesTop = true
+        case .topRight: movesLeft = false; movesRight = true; movesBottom = false; movesTop = true
+        case .bottomLeft: movesLeft = true; movesRight = false; movesBottom = true; movesTop = false
+        case .bottomRight: movesLeft = false; movesRight = true; movesBottom = true; movesTop = false
+        }
+
+        if movesLeft { frame.origin.x += dx; frame.size.width -= dx }
+        if movesRight { frame.size.width += dx }
+        if movesBottom { frame.origin.y += dy; frame.size.height -= dy }
+        if movesTop { frame.size.height += dy }
+
+        if frame.width < window.minSize.width {
+            frame.size.width = window.minSize.width
+            if movesLeft { frame.origin.x = startFrame.maxX - window.minSize.width }
+        }
+        if frame.height < window.minSize.height {
+            frame.size.height = window.minSize.height
+            if movesBottom { frame.origin.y = startFrame.maxY - window.minSize.height }
+        }
+        window.setFrame(frame, display: true)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        activeResizeEdge = nil
+        resizeStartPoint = nil
+        resizeStartFrame = nil
+        updateShelfResizeCursor()
+    }
+
+    private func resizeEdge(at point: NSPoint) -> ShelfResizeEdge? {
+        guard let window else { return nil }
+        let frame = window.frame
+        let left = point.x <= frame.minX + 20
+        let right = point.x >= frame.maxX - 20
+        let bottom = point.y <= frame.minY + 20
+        let top = point.y >= frame.maxY - 20
+        if left && top { return .topLeft }
+        if right && top { return .topRight }
+        if left && bottom { return .bottomLeft }
+        if right && bottom { return .bottomRight }
+        if left { return .left }
+        if right { return .right }
+        if top { return .top }
+        if bottom { return .bottom }
+        return nil
+    }
+
+    private func updateShelfResizeCursor() {
+        let edge = resizeEdge(at: NSEvent.mouseLocation)
+        guard edge != activeResizeEdge || (edge == nil && hasPushedResizeCursor) else { return }
+        restoreResizeCursor()
+        guard let edge else { return }
+        shelfResizeCursor(at: edge).push()
+        hasPushedResizeCursor = true
+        activeResizeEdge = edge
+    }
+
+    private func restoreResizeCursor() {
+        if hasPushedResizeCursor { NSCursor.pop() }
+        hasPushedResizeCursor = false
+        if resizeStartFrame == nil { activeResizeEdge = nil }
     }
 }
 
@@ -822,9 +905,9 @@ private func shelfResizeCursor(at edge: ShelfResizeEdge) -> NSCursor {
         case .top, .bottom:
             return .resizeUpDown
         case .topLeft, .bottomRight:
-            return diagonalResizeCursor(slope: 1)
-        case .topRight, .bottomLeft:
             return diagonalResizeCursor(slope: -1)
+        case .topRight, .bottomLeft:
+            return diagonalResizeCursor(slope: 1)
         }
     }
 
