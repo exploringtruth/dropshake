@@ -55,7 +55,8 @@ final class DropshakeRuntime: ObservableObject {
         self.shakeDetector = shakeDetector
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
 
-        shakeDetector.onShake = { [weak shelfWindow] in
+        shakeDetector.onShake = { [weak self, weak shelfWindow] in
+            self?.shelf.createShelf()
             shelfWindow?.show(near: NSEvent.mouseLocation)
         }
         shakeDetector.isEnabled = shakeEnabled
@@ -146,6 +147,10 @@ final class ShelfWindowController {
 
 @MainActor
 final class ShakeDetector {
+    private let gestureWindow: TimeInterval = 0.4
+    private let minimumShakeDistance: Double = 30
+    private let minimumDirectionReversals = 2
+
     var onShake: (() -> Void)?
     var isEnabled = true
 
@@ -204,7 +209,7 @@ final class ShakeDetector {
         let step = hypot(deltaX, deltaY)
         lastPoint = point
 
-        if timestamp - gestureStart > 0.7 {
+        if timestamp - gestureStart > gestureWindow {
             resetGesture(at: timestamp, point: previous)
         }
         guard step >= 3 else { return }
@@ -216,7 +221,9 @@ final class ShakeDetector {
         previousDirection = direction
         distance += step
 
-        if reversals >= 3, distance >= 72, timestamp - gestureStart <= 0.7 {
+        if reversals >= minimumDirectionReversals,
+           distance >= minimumShakeDistance,
+           timestamp - gestureStart <= gestureWindow {
             hasTriggered = true
             onShake?()
         }
@@ -462,6 +469,10 @@ struct ShelfView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            WindowDragHandle()
+                .frame(width: 18, height: 24)
+                .overlay(Image(systemName: "line.3.horizontal").font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary).allowsHitTesting(false))
+                .help("Drag to move shelf")
             Image(systemName: "tray.full.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.activeShelfName).font(.headline)
@@ -504,7 +515,7 @@ struct ShelfView: View {
     }
 
     private func itemCard(_ item: ShelfItem) -> some View {
-        VStack(spacing: 7) {
+        let card = VStack(spacing: 7) {
             if let fileURL = item.fileURL {
                 FileIcon(url: fileURL).frame(height: 48)
             } else {
@@ -523,10 +534,6 @@ struct ShelfView: View {
             }
             .buttonStyle(.plain).padding(5).opacity(0.85)
         }
-        .onDrag {
-            if let fileURL = item.fileURL { return fileDragProvider(for: fileURL) }
-            return NSItemProvider(object: (item.text ?? item.name) as NSString)
-        }
         .contextMenu {
             if let fileURL = item.fileURL {
                 Button("Quick Look") { QuickLookController.shared.preview(fileURL) }
@@ -543,24 +550,20 @@ struct ShelfView: View {
             Button("Remove from Shelf") { store.remove(item) }
         }
         .help("Drag \(item.name) out of the shelf")
+
+        if let fileURL = item.fileURL {
+            return AnyView(card.background(NativeFileDragSource(fileURL: fileURL) {
+                store.remove(item)
+            }))
+        }
+        return AnyView(card.onDrag {
+            NSItemProvider(object: (item.text ?? item.name) as NSString)
+        })
     }
 
     private func copyToClipboard(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
-    }
-
-    private func fileDragProvider(for fileURL: URL) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.registerFileRepresentation(
-            forTypeIdentifier: UTType.fileURL.identifier,
-            fileOptions: [.openInPlace],
-            visibility: .all
-        ) { completion in
-            completion(fileURL, true, nil)
-            return nil
-        }
-        return provider
     }
 
     private var footer: some View {
@@ -600,6 +603,84 @@ struct ShelfView: View {
             }
         }
         return true
+    }
+}
+
+private struct NativeFileDragSource: NSViewRepresentable {
+    let fileURL: URL
+    let onMove: () -> Void
+
+    func makeNSView(context: Context) -> FileDragSourceView {
+        let view = FileDragSourceView()
+        view.fileURL = fileURL
+        view.onMove = onMove
+        return view
+    }
+
+    func updateNSView(_ view: FileDragSourceView, context: Context) {
+        view.fileURL = fileURL
+        view.onMove = onMove
+    }
+}
+
+private final class FileDragSourceView: NSView, NSDraggingSource {
+    var fileURL: URL?
+    var onMove: (() -> Void)?
+    private var mouseDownPoint: NSPoint?
+    private var didStartDrag = false
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        didStartDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !didStartDrag,
+              let fileURL,
+              let mouseDownPoint else { return }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        guard hypot(currentPoint.x - mouseDownPoint.x, currentPoint.y - mouseDownPoint.y) >= 4 else { return }
+
+        didStartDrag = true
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(fileURL.absoluteString, forType: .fileURL)
+        pasteboardItem.setString(fileURL.absoluteString, forType: .URL)
+
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        draggingItem.setDraggingFrame(bounds, contents: NSWorkspace.shared.icon(forFile: fileURL.path))
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        mouseDownPoint = nil
+        didStartDrag = false
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        [.copy, .move, .link]
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        if operation == .move { onMove?() }
+    }
+}
+
+private struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { WindowDragView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class WindowDragView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .openHand)
     }
 }
 
