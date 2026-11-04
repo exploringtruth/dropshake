@@ -7,6 +7,8 @@ PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 
 VERSION="${VERSION:-$PLIST_VERSION}"
 APP_NAME="Dropshake"
 BUILD_DIR="$ROOT/.build"
+ARM64_BUILD_DIR="$BUILD_DIR/universal-arm64"
+X86_64_BUILD_DIR="$BUILD_DIR/universal-x86_64"
 APP="$BUILD_DIR/$APP_NAME.app"
 DMG="$ROOT/$APP_NAME-$VERSION.dmg"
 RW_DMG="$BUILD_DIR/$APP_NAME-$VERSION-rw.dmg"
@@ -17,11 +19,17 @@ ICONSET="$BUILD_DIR/Dropshake.iconset"
 
 command -v swift >/dev/null || { echo "Swift is required." >&2; exit 1; }
 command -v hdiutil >/dev/null || { echo "Run this script on macOS." >&2; exit 1; }
+command -v lipo >/dev/null || { echo "lipo is required to build a universal app." >&2; exit 1; }
 
 cd "$ROOT"
-swift build -c "$CONFIGURATION"
+swift build -c "$CONFIGURATION" --triple arm64-apple-macosx13.0 --scratch-path "$ARM64_BUILD_DIR"
+swift build -c "$CONFIGURATION" --triple x86_64-apple-macosx13.0 --scratch-path "$X86_64_BUILD_DIR"
+ARM64_BIN_DIR="$(swift build --show-bin-path -c "$CONFIGURATION" --triple arm64-apple-macosx13.0 --scratch-path "$ARM64_BUILD_DIR")"
+X86_64_BIN_DIR="$(swift build --show-bin-path -c "$CONFIGURATION" --triple x86_64-apple-macosx13.0 --scratch-path "$X86_64_BUILD_DIR")"
+lipo -create "$ARM64_BIN_DIR/$APP_NAME" "$X86_64_BIN_DIR/$APP_NAME" -output "$BUILD_DIR/$APP_NAME-universal"
+echo "Universal binary: $(lipo -archs "$BUILD_DIR/$APP_NAME-universal")"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BUILD_DIR/$CONFIGURATION/Dropshake" "$APP/Contents/MacOS/Dropshake"
+cp "$BUILD_DIR/$APP_NAME-universal" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
