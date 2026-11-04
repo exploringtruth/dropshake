@@ -43,7 +43,7 @@ final class DropshakeRuntime: ObservableObject {
 
         shakeDetector.onShake = { [weak self, weak shelfWindow] in
             self?.shelf.clear()
-            shelfWindow?.show(near: NSEvent.mouseLocation)
+            shelfWindow?.show(near: NSEvent.mouseLocation, resetToDefaultSize: true)
         }
         shakeDetector.isEnabled = shakeEnabled
         shakeDetector.start()
@@ -87,8 +87,13 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    func show(near point: NSPoint?) {
+    func show(near point: NSPoint?, resetToDefaultSize: Bool = false) {
         let panel = makePanelIfNeeded()
+        if resetToDefaultSize {
+            panel.setContentSize(defaultPanelSize)
+            UserDefaults.standard.set(Double(defaultPanelSize.width), forKey: savedWidthKey)
+            UserDefaults.standard.set(Double(defaultPanelSize.height), forKey: savedHeightKey)
+        }
         let size = panel.frame.size
         let target = point ?? NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(target) }) ?? NSScreen.main
@@ -454,7 +459,7 @@ struct ShelfView: View {
             Button(action: onClose) { Image(systemName: "xmark") }
                 .buttonStyle(.plain).help("Hide shelf")
         }
-        .padding(.horizontal, 18).padding(.vertical, 14)
+        .padding(.horizontal, 30).padding(.vertical, 14)
         .background(WindowDragHandle())
     }
 
@@ -861,8 +866,7 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
     }
 
     private func screenLocation(for event: NSEvent) -> NSPoint {
-        guard let eventWindow = event.window else { return NSEvent.mouseLocation }
-        return eventWindow.convertPoint(toScreen: event.locationInWindow)
+        NSEvent.mouseLocation
     }
 
     private func resizeEdge(at point: NSPoint) -> ShelfResizeEdge? {
@@ -872,10 +876,10 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         let right = point.x >= frame.maxX - 5
         let bottom = point.y <= frame.minY + 5
         let top = point.y >= frame.maxY - 5
-        let cornerLeft = point.x <= frame.minX + 10
-        let cornerRight = point.x >= frame.maxX - 10
-        let cornerBottom = point.y <= frame.minY + 10
-        let cornerTop = point.y >= frame.maxY - 10
+        let cornerLeft = point.x <= frame.minX + 24
+        let cornerRight = point.x >= frame.maxX - 24
+        let cornerBottom = point.y <= frame.minY + 24
+        let cornerTop = point.y >= frame.maxY - 24
 
         if cornerLeft && cornerTop { return .topLeft }
         if cornerRight && cornerTop { return .topRight }
