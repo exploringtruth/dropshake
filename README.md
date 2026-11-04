@@ -14,7 +14,7 @@ Dropshake is an independent project inspired by the general file-shelf workflow.
 - Drag files and folders from the shelf into Finder or another app that accepts file drags; text and links can be dragged out as text.
 - Open items, reveal files in Finder, copy paths or text, and remove items from the shelf context menu.
 - Remove one item or clear the whole shelf.
-- Remember shelf contents across launches. The shelf stores file references; it does not copy or upload the files.
+- Remember shelf contents across launches using macOS bookmarks for file references, so moved files can often be located again; the shelf does not copy or upload the files.
 - Display Finder icons, names, and file types.
 
 Custom actions, image clipboard capture, and configurable global shortcuts remain future work.
@@ -42,7 +42,7 @@ On a Mac, from the project directory:
 bash ./scripts/build-dmg.sh
 ```
 
-This compiles a release build, creates `Dropshake.app`, and writes `Dropshake-0.2.0.dmg` in the project root. Override the version with `VERSION=1.0.0 bash ./scripts/build-dmg.sh`.
+This compiles a release build, creates `Dropshake.app`, and writes `Dropshake-0.2.1.dmg` in the project root. Override the version with `VERSION=1.0.0 bash ./scripts/build-dmg.sh`.
 
 The default package is ad-hoc signed for local use. Since it is not signed with an Apple Developer ID or notarized, Gatekeeper may block the first launch on another Mac. For a public download that opens without that warning, sign and notarize the app with an Apple Developer ID certificate before sharing. Set `CODE_SIGN_IDENTITY` to that certificate's identity and `NOTARY_PROFILE` to a profile created with `xcrun notarytool store-credentials` when packaging. The script submits and staples the DMG when `NOTARY_PROFILE` is set.
 
@@ -51,8 +51,8 @@ The default package is ad-hoc signed for local use. Since it is not signed with 
 Push this project to a GitHub repository, then push a version tag:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 The GitHub Actions workflow builds a macOS DMG and attaches it to a GitHub Release. Releases produced by the included workflow are ad-hoc signed; configure Developer ID signing, notarization credentials, and certificate import in CI before sharing them as a polished public download. A private GitHub repository limits release downloads to people with repository access.
