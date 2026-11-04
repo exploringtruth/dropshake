@@ -631,7 +631,7 @@ private struct ShelfDropTarget: NSViewRepresentable {
     }
 }
 
-private final class ShelfDropTargetView: NSView, NSDraggingDestination {
+private final class ShelfDropTargetView: NSView {
     var onTargetChange: ((Bool) -> Void)?
     var onFileURL: ((URL) -> Void)?
     var onURL: ((URL) -> Void)?
@@ -646,18 +646,18 @@ private final class ShelfDropTargetView: NSView, NSDraggingDestination {
 
     required init?(coder: NSCoder) { nil }
 
-    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         onTargetChange?(true)
         return .copy
     }
 
-    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
 
-    func draggingExited(_ sender: NSDraggingInfo?) {
+    override func draggingExited(_ sender: NSDraggingInfo?) {
         onTargetChange?(false)
     }
 
-    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { onTargetChange?(false) }
         let pasteboard = sender.draggingPasteboard
         let readURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [NSURL] ?? []
