@@ -1,4 +1,5 @@
 import AppKit
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -527,6 +528,7 @@ struct ShelfView: View {
         }
         .contextMenu {
             if let fileURL = item.fileURL {
+                Button("Quick Look") { QuickLookController.shared.preview(fileURL) }
                 Button("Open Item") { NSWorkspace.shared.open(fileURL) }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([fileURL]) }
                 Button("Copy Path") { copyToClipboard(fileURL.path) }
@@ -584,6 +586,27 @@ struct ShelfView: View {
             }
         }
         return true
+    }
+}
+
+@MainActor
+private final class QuickLookController: NSObject, QLPreviewPanelDataSource {
+    static let shared = QuickLookController()
+    private var previewItems: [NSURL] = []
+
+    func preview(_ url: URL) {
+        previewItems = [url as NSURL]
+        guard let panel = QLPreviewPanel.shared() else { return }
+        panel.dataSource = self
+        panel.reloadData()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewItems.count }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        guard previewItems.indices.contains(index) else { return nil }
+        return previewItems[index]
     }
 }
 
