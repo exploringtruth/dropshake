@@ -3,3 +3,4 @@
 *.dmg
 *.xcuserstate
 DerivedData/
+.DS_Store
