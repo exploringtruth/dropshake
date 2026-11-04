@@ -74,23 +74,30 @@ final class DropshakeRuntime: ObservableObject {
 }
 
 @MainActor
-final class ShelfWindowController {
+final class ShelfWindowController: NSObject, NSWindowDelegate {
     private let store: ShelfStore
     private var panel: NSPanel?
-    private let panelSize = NSSize(width: 380, height: 330)
+    private let defaultPanelSize = NSSize(width: 380, height: 330)
+    private let minimumPanelSize = NSSize(width: 300, height: 240)
+    private let savedWidthKey = "dropshake.shelfWindow.width"
+    private let savedHeightKey = "dropshake.shelfWindow.height"
 
-    init(store: ShelfStore) { self.store = store }
+    init(store: ShelfStore) {
+        self.store = store
+        super.init()
+    }
 
     func show(near point: NSPoint?) {
         let panel = makePanelIfNeeded()
+        let size = panel.frame.size
         let target = point ?? NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(target) }) ?? NSScreen.main
-        let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: panelSize)
+        let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: defaultPanelSize)
         let origin = NSPoint(
-            x: min(max(target.x + 18, visibleFrame.minX), visibleFrame.maxX - panelSize.width),
-            y: min(max(target.y - panelSize.height / 2, visibleFrame.minY), visibleFrame.maxY - panelSize.height)
+            x: min(max(target.x + 18, visibleFrame.minX), visibleFrame.maxX - size.width),
+            y: min(max(target.y - size.height / 2, visibleFrame.minY), visibleFrame.maxY - size.height)
         )
-        panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.orderFrontRegardless()
     }
 
@@ -99,12 +106,20 @@ final class ShelfWindowController {
     private func makePanelIfNeeded() -> NSPanel {
         if let panel { return panel }
 
+        let savedWidth = UserDefaults.standard.double(forKey: savedWidthKey)
+        let savedHeight = UserDefaults.standard.double(forKey: savedHeightKey)
+        let initialSize = NSSize(
+            width: max(minimumPanelSize.width, savedWidth == 0 ? defaultPanelSize.width : savedWidth),
+            height: max(minimumPanelSize.height, savedHeight == 0 ? defaultPanelSize.height : savedHeight)
+        )
         let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: panelSize),
-            styleMask: [.borderless, .nonactivatingPanel],
+            contentRect: NSRect(origin: .zero, size: initialSize),
+            styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
         )
+        panel.minSize = minimumPanelSize
+        panel.delegate = self
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
@@ -115,10 +130,22 @@ final class ShelfWindowController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(
             rootView: ShelfView(store: store, onClose: { [weak self] in self?.hide() })
-                .frame(width: panelSize.width, height: panelSize.height)
+                .frame(
+                    minWidth: minimumPanelSize.width,
+                    maxWidth: .infinity,
+                    minHeight: minimumPanelSize.height,
+                    maxHeight: .infinity
+                )
         )
         self.panel = panel
         return panel
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let resizedPanel = notification.object as? NSWindow,
+              resizedPanel === panel else { return }
+        UserDefaults.standard.set(Double(resizedPanel.frame.width), forKey: savedWidthKey)
+        UserDefaults.standard.set(Double(resizedPanel.frame.height), forKey: savedHeightKey)
     }
 }
 
