@@ -453,7 +453,15 @@ struct ShelfView: View {
         .background(isTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor).opacity(0.82))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18)))
-        .onDrop(of: [.fileURL, .url, .plainText], isTargeted: $isTargeted, perform: acceptDrop)
+        .background(ShelfDropTarget(
+            isTargeted: $isTargeted,
+            onFileURL: { store.add(fileURL: $0) },
+            onURL: { url in
+                if url.isFileURL { store.add(fileURL: url) }
+                else { store.add(text: url.absoluteString) }
+            },
+            onText: { store.add(text: $0) }
+        ))
         .alert("Rename Shelf", isPresented: $showingRename) {
             TextField("Shelf name", text: $shelfNameDraft)
             Button("Cancel", role: .cancel) {}
@@ -517,7 +525,12 @@ struct ShelfView: View {
     private func itemCard(_ item: ShelfItem) -> some View {
         let card = VStack(spacing: 7) {
             if let fileURL = item.fileURL {
-                FileIcon(url: fileURL).frame(height: 48)
+                FileIcon(url: fileURL)
+                    .frame(height: 48)
+                    .allowsHitTesting(false)
+                    .overlay {
+                        NativeFileDragSource(fileURL: fileURL) { store.remove(item) }
+                    }
             } else {
                 Image(systemName: item.kind == "Link" ? "link" : "text.alignleft")
                     .font(.system(size: 28, weight: .light)).foregroundStyle(.tint).frame(height: 48)
@@ -551,14 +564,12 @@ struct ShelfView: View {
         }
         .help("Drag \(item.name) out of the shelf")
 
-        if let fileURL = item.fileURL {
-            return AnyView(card.background(NativeFileDragSource(fileURL: fileURL) {
-                store.remove(item)
-            }))
-        }
-        return AnyView(card.onDrag {
+        if item.fileURL == nil {
+            return AnyView(card.onDrag {
             NSItemProvider(object: (item.text ?? item.name) as NSString)
-        })
+            })
+        }
+        return AnyView(card)
     }
 
     private func copyToClipboard(_ value: String) {
@@ -577,33 +588,6 @@ struct ShelfView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
-    private func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
-        let accepted = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-                || $0.hasItemConformingToTypeIdentifier(UTType.url.identifier)
-                || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
-        }
-        guard !accepted.isEmpty else { return false }
-        for provider in accepted {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
-                    Task { @MainActor in store.add(fileURL: url) }
-                }
-            } else if provider.canLoadObject(ofClass: URL.self) {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
-                    Task { @MainActor in store.add(text: url.absoluteString) }
-                }
-            } else {
-                _ = provider.loadObject(ofClass: String.self) { value, _ in
-                    guard let value else { return }
-                    Task { @MainActor in store.add(text: value) }
-                }
-            }
-        }
-        return true
-    }
 }
 
 private struct NativeFileDragSource: NSViewRepresentable {
@@ -623,11 +607,92 @@ private struct NativeFileDragSource: NSViewRepresentable {
     }
 }
 
+private struct ShelfDropTarget: NSViewRepresentable {
+    @Binding var isTargeted: Bool
+    let onFileURL: (URL) -> Void
+    let onURL: (URL) -> Void
+    let onText: (String) -> Void
+
+    func makeNSView(context: Context) -> ShelfDropTargetView {
+        let view = ShelfDropTargetView()
+        update(view)
+        return view
+    }
+
+    func updateNSView(_ view: ShelfDropTargetView, context: Context) {
+        update(view)
+    }
+
+    private func update(_ view: ShelfDropTargetView) {
+        view.onTargetChange = { isTargeted = $0 }
+        view.onFileURL = onFileURL
+        view.onURL = onURL
+        view.onText = onText
+    }
+}
+
+private final class ShelfDropTargetView: NSView, NSDraggingDestination {
+    var onTargetChange: ((Bool) -> Void)?
+    var onFileURL: ((URL) -> Void)?
+    var onURL: ((URL) -> Void)?
+    var onText: ((String) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL, .URL, .string])
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onTargetChange?(true)
+        return .copy
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+    func draggingExited(_ sender: NSDraggingInfo?) {
+        onTargetChange?(false)
+    }
+
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { onTargetChange?(false) }
+        let pasteboard = sender.draggingPasteboard
+        let readURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [NSURL] ?? []
+        let fileURLs = readURLs.map { $0 as URL }.filter(\.isFileURL)
+        if !fileURLs.isEmpty {
+            fileURLs.forEach { onFileURL?($0) }
+            return true
+        }
+
+        let pasteboardFileURLs = (pasteboard.pasteboardItems ?? []).compactMap { item in
+            item.string(forType: .fileURL).flatMap(URL.init(string:))
+        }.filter(\.isFileURL)
+        if !pasteboardFileURLs.isEmpty {
+            pasteboardFileURLs.forEach { onFileURL?($0) }
+            return true
+        }
+        if let url = readURLs.first.map({ $0 as URL }) {
+            onURL?(url)
+            return true
+        }
+        if let text = pasteboard.string(forType: .string), !text.isEmpty {
+            onText?(text)
+            return true
+        }
+        return false
+    }
+}
+
 private final class FileDragSourceView: NSView, NSDraggingSource {
     var fileURL: URL?
     var onMove: (() -> Void)?
     private var mouseDownPoint: NSPoint?
     private var didStartDrag = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = convert(event.locationInWindow, from: nil)
@@ -642,11 +707,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
         guard hypot(currentPoint.x - mouseDownPoint.x, currentPoint.y - mouseDownPoint.y) >= 4 else { return }
 
         didStartDrag = true
-        let pasteboardItem = NSPasteboardItem()
-        pasteboardItem.setString(fileURL.absoluteString, forType: .fileURL)
-        pasteboardItem.setString(fileURL.absoluteString, forType: .URL)
-
-        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        let draggingItem = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
         draggingItem.setDraggingFrame(bounds, contents: NSWorkspace.shared.icon(forFile: fileURL.path))
         beginDraggingSession(with: [draggingItem], event: event, source: self)
     }
@@ -675,8 +736,28 @@ private struct WindowDragHandle: NSViewRepresentable {
 }
 
 private final class WindowDragView: NSView {
+    private var initialMouseLocation: NSPoint?
+    private var initialWindowOrigin: NSPoint?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
+        initialMouseLocation = NSEvent.mouseLocation
+        initialWindowOrigin = window?.frame.origin
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let initialMouseLocation, let initialWindowOrigin, let window else { return }
+        let pointer = NSEvent.mouseLocation
+        window.setFrameOrigin(NSPoint(
+            x: initialWindowOrigin.x + pointer.x - initialMouseLocation.x,
+            y: initialWindowOrigin.y + pointer.y - initialMouseLocation.y
+        ))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        initialMouseLocation = nil
+        initialWindowOrigin = nil
     }
 
     override func resetCursorRects() {
