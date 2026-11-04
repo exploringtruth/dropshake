@@ -758,7 +758,8 @@ private enum ShelfResizeEdge {
 
 private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content> {
     private var shelfTrackingArea: NSTrackingArea?
-    private var activeResizeEdge: ShelfResizeEdge?
+    private var hoveredResizeEdge: ShelfResizeEdge?
+    private var draggedResizeEdge: ShelfResizeEdge?
     private var hasPushedResizeCursor = false
     private var resizeStartPoint: NSPoint?
     private var resizeStartFrame: NSRect?
@@ -792,13 +793,13 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
             super.mouseDown(with: event)
             return
         }
-        activeResizeEdge = edge
+        draggedResizeEdge = edge
         resizeStartPoint = NSEvent.mouseLocation
         resizeStartFrame = window.frame
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let edge = activeResizeEdge,
+        guard let edge = draggedResizeEdge,
               let startPoint = resizeStartPoint,
               let startFrame = resizeStartFrame,
               let window else {
@@ -842,7 +843,7 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
     }
 
     override func mouseUp(with event: NSEvent) {
-        activeResizeEdge = nil
+        draggedResizeEdge = nil
         resizeStartPoint = nil
         resizeStartFrame = nil
         updateShelfResizeCursor()
@@ -851,10 +852,19 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
     private func resizeEdge(at point: NSPoint) -> ShelfResizeEdge? {
         guard let window else { return nil }
         let frame = window.frame
-        let left = point.x <= frame.minX + 20
-        let right = point.x >= frame.maxX - 20
-        let bottom = point.y <= frame.minY + 20
-        let top = point.y >= frame.maxY - 20
+        let left = point.x <= frame.minX + 8
+        let right = point.x >= frame.maxX - 8
+        let bottom = point.y <= frame.minY + 8
+        let top = point.y >= frame.maxY - 8
+        let cornerLeft = point.x <= frame.minX + 12
+        let cornerRight = point.x >= frame.maxX - 12
+        let cornerBottom = point.y <= frame.minY + 12
+        let cornerTop = point.y >= frame.maxY - 12
+
+        if cornerLeft && cornerTop { return .topLeft }
+        if cornerRight && cornerTop { return .topRight }
+        if cornerLeft && cornerBottom { return .bottomLeft }
+        if cornerRight && cornerBottom { return .bottomRight }
         if left && top { return .topLeft }
         if right && top { return .topRight }
         if left && bottom { return .bottomLeft }
@@ -868,18 +878,18 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
 
     private func updateShelfResizeCursor() {
         let edge = resizeEdge(at: NSEvent.mouseLocation)
-        guard edge != activeResizeEdge || (edge == nil && hasPushedResizeCursor) else { return }
+        guard edge != hoveredResizeEdge else { return }
         restoreResizeCursor()
         guard let edge else { return }
         shelfResizeCursor(at: edge).push()
         hasPushedResizeCursor = true
-        activeResizeEdge = edge
+        hoveredResizeEdge = edge
     }
 
     private func restoreResizeCursor() {
         if hasPushedResizeCursor { NSCursor.pop() }
         hasPushedResizeCursor = false
-        if resizeStartFrame == nil { activeResizeEdge = nil }
+        hoveredResizeEdge = nil
     }
 }
 
