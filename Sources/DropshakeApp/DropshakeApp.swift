@@ -141,7 +141,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = ResizableShelfHostingView(
+        let shelfContent = NSHostingView(
             rootView: ShelfView(store: store, onClose: { [weak self] in self?.hide() })
                 .frame(
                     minWidth: minimumPanelSize.width,
@@ -150,6 +150,13 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
                     maxHeight: .infinity
                 )
         )
+        let resizeContainer = ResizableShelfContainerView(
+            frame: NSRect(origin: .zero, size: initialSize)
+        )
+        shelfContent.frame = resizeContainer.bounds
+        shelfContent.autoresizingMask = [.width, .height]
+        resizeContainer.addSubview(shelfContent)
+        panel.contentView = resizeContainer
         self.panel = panel
         return panel
     }
@@ -455,6 +462,7 @@ struct ShelfView: View {
                 Text(store.items.isEmpty ? "Your temporary shelf" : "\(store.items.count) item\(store.items.count == 1 ? "" : "s")")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            .overlay { WindowDragHandle() }
             Spacer()
             if !store.items.isEmpty {
                 Button(action: store.clear) { Image(systemName: "trash") }
@@ -788,14 +796,23 @@ private enum ShelfResizeEdge {
     var changesBottom: Bool { self == .bottom || self == .bottomLeft || self == .bottomRight }
 }
 
-private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content> {
+private final class ResizableShelfContainerView: NSView {
     private var shelfTrackingArea: NSTrackingArea?
     private var resizingEdge: ShelfResizeEdge?
     private var resizeStartMouse: NSPoint?
     private var resizeStartFrame: NSRect?
 
     private let edgeThickness: CGFloat = 10
-    private let cornerThickness: CGFloat = 24
+    private let topEdgeThickness: CGFloat = 44
+    private let cornerThickness: CGFloat = 36
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -857,6 +874,12 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         if edge.changesBottom { minY += mouse.y - resizeStartMouse.y }
         if edge.changesTop { maxY += mouse.y - resizeStartMouse.y }
 
+        let scale = max(window.backingScaleFactor, 1)
+        if edge.changesLeft { minX = (minX * scale).rounded() / scale }
+        if edge.changesRight { maxX = (maxX * scale).rounded() / scale }
+        if edge.changesBottom { minY = (minY * scale).rounded() / scale }
+        if edge.changesTop { maxY = (maxY * scale).rounded() / scale }
+
         let minimumSize = window.minSize
         if maxX - minX < minimumSize.width {
             if edge.changesLeft { minX = maxX - minimumSize.width }
@@ -898,8 +921,8 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
     private func resizeEdge(at point: NSPoint) -> ShelfResizeEdge? {
         let distanceFromLeft = point.x - bounds.minX
         let distanceFromRight = bounds.maxX - point.x
-        let distanceFromTop = isFlipped ? point.y - bounds.minY : bounds.maxY - point.y
-        let distanceFromBottom = isFlipped ? bounds.maxY - point.y : point.y - bounds.minY
+        let distanceFromTop = point.y - bounds.minY
+        let distanceFromBottom = bounds.maxY - point.y
 
         let nearLeft = distanceFromLeft <= cornerThickness
         let nearRight = distanceFromRight <= cornerThickness
@@ -912,7 +935,7 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         if nearBottom && nearRight { return .bottomRight }
         if distanceFromLeft <= edgeThickness { return .left }
         if distanceFromRight <= edgeThickness { return .right }
-        if distanceFromTop <= edgeThickness { return .top }
+        if distanceFromTop <= topEdgeThickness { return .top }
         if distanceFromBottom <= edgeThickness { return .bottom }
         return nil
     }
