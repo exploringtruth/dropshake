@@ -788,7 +788,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !didStartDrag, let item { onClick?(mouseDownModifiers) }
+        if !didStartDrag, item != nil { onClick?(mouseDownModifiers) }
         mouseDownPoint = nil
         didStartDrag = false
     }
@@ -799,7 +799,7 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         dragIsExternal = context == .outsideApplication
-        [.copy, .move, .link]
+        return NSDragOperation([.copy, .move, .link])
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
