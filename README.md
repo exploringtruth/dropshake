@@ -35,10 +35,10 @@ The app's window is the shelf. Use the Dropshake tray icon in the menu bar to br
 On a Mac, from the project directory:
 
 ```sh
-./scripts/build-dmg.sh
+bash ./scripts/build-dmg.sh
 ```
 
-This compiles a release build, creates `Dropshake.app`, and writes `Dropshake-0.1.0.dmg` in the project root. Override the version with `VERSION=1.0.0 ./scripts/build-dmg.sh`.
+This compiles a release build, creates `Dropshake.app`, and writes `Dropshake-0.1.0.dmg` in the project root. Override the version with `VERSION=1.0.0 bash ./scripts/build-dmg.sh`.
 
 The default package is ad-hoc signed for local use. Since it is not signed with an Apple Developer ID or notarized, Gatekeeper may block the first launch on another Mac. For a public download that opens without that warning, sign and notarize the app with an Apple Developer ID certificate before sharing. Set `CODE_SIGN_IDENTITY` to that certificate's identity and `NOTARY_PROFILE` to a profile created with `xcrun notarytool store-credentials` when packaging. The script submits and staples the DMG when `NOTARY_PROFILE` is set.
 
