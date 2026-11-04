@@ -459,7 +459,7 @@ struct ShelfView: View {
                     .buttonStyle(.plain).help("Clear shelf")
             }
             Button(action: onClose) { Image(systemName: "xmark") }
-                .buttonStyle(.plain).help("Hide shelf")
+                .buttonStyle(.plain).focusable(false).help("Hide shelf")
         }
         .padding(.horizontal, 30).padding(.vertical, 14)
         .background(WindowDragHandle())
@@ -786,9 +786,6 @@ private final class WindowDragView: NSView {
         initialWindowOrigin = nil
     }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .openHand)
-    }
 }
 
 @MainActor
