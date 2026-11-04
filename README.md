@@ -28,8 +28,7 @@ Custom actions, image clipboard capture, and configurable global shortcuts remai
 ## Requirements
 
 - macOS 13 or newer
-- Swift 5.10 or newer
-- Xcode command line tools for building
+- Full Xcode installation with its Swift toolchain (the standalone Command Line Tools are not sufficient to build SwiftUI targets)
 - `hdiutil` and `codesign` (included with macOS)
 
 ## Run from source
