@@ -4,6 +4,8 @@
 
 Dropshake is an independent project inspired by the general file-shelf workflow. It is not affiliated with Dropover and does not include Dropover code, artwork, or branding.
 
+[Download Dropshake for macOS](https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake-0.2.4.dmg)
+
 ## What works today
 
 - Native SwiftUI shelf window with a menu bar control.
