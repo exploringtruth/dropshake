@@ -465,8 +465,9 @@ struct ShelfView: View {
         .padding(.horizontal, 30).padding(.vertical, 14)
         .background {
             GeometryReader { proxy in
-                let topInset: CGFloat = 12
-                let sideInset: CGFloat = 16
+                // Keep the drag target clear of AppKit's native resize border.
+                let topInset: CGFloat = 24
+                let sideInset: CGFloat = 20
                 WindowDragHandle()
                     .frame(
                         width: max(0, proxy.size.width - sideInset * 2),
@@ -777,30 +778,12 @@ private struct WindowDragHandle: NSViewRepresentable {
 }
 
 private final class WindowDragView: NSView {
-    private var initialMouseLocation: NSPoint?
-    private var initialWindowOrigin: NSPoint?
-
+    override var mouseDownCanMoveWindow: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        initialMouseLocation = NSEvent.mouseLocation
-        initialWindowOrigin = window?.frame.origin
+        window?.performDrag(with: event)
     }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let initialMouseLocation, let initialWindowOrigin, let window else { return }
-        let pointer = NSEvent.mouseLocation
-        window.setFrameOrigin(NSPoint(
-            x: initialWindowOrigin.x + pointer.x - initialMouseLocation.x,
-            y: initialWindowOrigin.y + pointer.y - initialMouseLocation.y
-        ))
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        initialMouseLocation = nil
-        initialWindowOrigin = nil
-    }
-
 }
 
 @MainActor
