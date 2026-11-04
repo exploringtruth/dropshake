@@ -1,5 +1,5 @@
 import AppKit
-import QuickLook
+import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
 
