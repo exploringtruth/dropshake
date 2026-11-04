@@ -421,6 +421,7 @@ struct ShelfView: View {
         .background(isTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor).opacity(0.82))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18)))
+        .overlay { ShelfResizeCursorHints().allowsHitTesting(false) }
         .background(ShelfDropTarget(
             isTargeted: $isTargeted,
             onFileURL: { store.add(fileURL: $0) },
@@ -748,6 +749,118 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
 private struct WindowDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { WindowDragView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private struct ShelfResizeCursorHints: NSViewRepresentable {
+    func makeNSView(context: Context) -> ShelfResizeCursorView { ShelfResizeCursorView() }
+    func updateNSView(_ nsView: ShelfResizeCursorView, context: Context) {}
+}
+
+private enum ShelfResizeEdge {
+    case left, right, top, bottom
+    case topLeft, topRight, bottomLeft, bottomRight
+}
+
+private final class ShelfResizeCursorView: NSView {
+    private let edgeThickness: CGFloat = 12
+    private let cornerSize: CGFloat = 24
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func resetCursorRects() {
+        let horizontalSpan = max(0, bounds.height - 2 * cornerSize)
+        let verticalSpan = max(0, bounds.width - 2 * cornerSize)
+
+        addCursorRect(
+            NSRect(x: bounds.minX, y: bounds.minY + cornerSize, width: edgeThickness, height: horizontalSpan),
+            cursor: resizeCursor(at: .left)
+        )
+        addCursorRect(
+            NSRect(x: bounds.maxX - edgeThickness, y: bounds.minY + cornerSize, width: edgeThickness, height: horizontalSpan),
+            cursor: resizeCursor(at: .right)
+        )
+        addCursorRect(
+            NSRect(x: bounds.minX + cornerSize, y: bounds.minY, width: verticalSpan, height: edgeThickness),
+            cursor: resizeCursor(at: .bottom)
+        )
+        addCursorRect(
+            NSRect(x: bounds.minX + cornerSize, y: bounds.maxY - edgeThickness, width: verticalSpan, height: edgeThickness),
+            cursor: resizeCursor(at: .top)
+        )
+
+        addCursorRect(NSRect(x: bounds.minX, y: bounds.minY, width: cornerSize, height: cornerSize), cursor: resizeCursor(at: .bottomLeft))
+        addCursorRect(NSRect(x: bounds.maxX - cornerSize, y: bounds.minY, width: cornerSize, height: cornerSize), cursor: resizeCursor(at: .bottomRight))
+        addCursorRect(NSRect(x: bounds.minX, y: bounds.maxY - cornerSize, width: cornerSize, height: cornerSize), cursor: resizeCursor(at: .topLeft))
+        addCursorRect(NSRect(x: bounds.maxX - cornerSize, y: bounds.maxY - cornerSize, width: cornerSize, height: cornerSize), cursor: resizeCursor(at: .topRight))
+    }
+
+    private func resizeCursor(at edge: ShelfResizeEdge) -> NSCursor {
+        if #available(macOS 15.0, *) {
+            return frameResizeCursor(at: edge)
+        }
+
+        switch edge {
+        case .left, .right:
+            return .resizeLeftRight
+        case .top, .bottom:
+            return .resizeUpDown
+        case .topLeft, .bottomRight:
+            return diagonalCursor(slope: 1)
+        case .topRight, .bottomLeft:
+            return diagonalCursor(slope: -1)
+        }
+    }
+
+    @available(macOS 15.0, *)
+    private func frameResizeCursor(at edge: ShelfResizeEdge) -> NSCursor {
+        let position: NSCursor.FrameResizePosition
+        switch edge {
+        case .left: position = .left
+        case .right: position = .right
+        case .top: position = .top
+        case .bottom: position = .bottom
+        case .topLeft: position = .topLeft
+        case .topRight: position = .topRight
+        case .bottomLeft: position = .bottomLeft
+        case .bottomRight: position = .bottomRight
+        }
+        return NSCursor.frameResize(position: position, directions: .all)
+    }
+
+    private func diagonalCursor(slope: CGFloat) -> NSCursor {
+        let size = NSSize(width: 28, height: 28)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        let transform = NSAffineTransform()
+        transform.translateX(by: size.width / 2, yBy: size.height / 2)
+        transform.rotate(byDegrees: slope > 0 ? 45 : -45)
+        transform.concat()
+
+        let arrow = NSBezierPath()
+        arrow.move(to: NSPoint(x: -8, y: 0))
+        arrow.line(to: NSPoint(x: 8, y: 0))
+        arrow.move(to: NSPoint(x: -8, y: 0))
+        arrow.line(to: NSPoint(x: -4, y: 4))
+        arrow.move(to: NSPoint(x: -8, y: 0))
+        arrow.line(to: NSPoint(x: -4, y: -4))
+        arrow.move(to: NSPoint(x: 8, y: 0))
+        arrow.line(to: NSPoint(x: 4, y: 4))
+        arrow.move(to: NSPoint(x: 8, y: 0))
+        arrow.line(to: NSPoint(x: 4, y: -4))
+        arrow.lineWidth = 2.5
+        arrow.lineCapStyle = .round
+        arrow.lineJoinStyle = .round
+        NSColor.white.setStroke()
+        arrow.lineWidth = 4.5
+        arrow.stroke()
+        NSColor.black.setStroke()
+        arrow.lineWidth = 2
+        arrow.stroke()
+
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+    }
 }
 
 private final class WindowDragView: NSView {
