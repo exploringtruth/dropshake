@@ -103,7 +103,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
             y: min(max(target.y - size.height / 2, visibleFrame.minY), visibleFrame.maxY - size.height)
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
-        panel.orderFrontRegardless()
+        panel.makeKeyAndOrderFront(nil)
     }
 
     func hide() { panel?.orderOut(nil) }
@@ -132,6 +132,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         panel.minSize = minimumPanelSize
         panel.delegate = self
         panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = false
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
