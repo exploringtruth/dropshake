@@ -124,6 +124,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
+        panel.acceptsMouseMovedEvents = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -756,32 +757,47 @@ private enum ShelfResizeEdge {
 }
 
 private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content> {
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        installShelfResizeCursorRects(on: self)
+    private var shelfTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        if let shelfTrackingArea { removeTrackingArea(shelfTrackingArea) }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        shelfTrackingArea = trackingArea
+        addTrackingArea(trackingArea)
+        super.updateTrackingAreas()
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        window?.invalidateCursorRects(for: self)
+    override func mouseEntered(with event: NSEvent) { updateShelfResizeCursor(at: event) }
+    override func mouseMoved(with event: NSEvent) { updateShelfResizeCursor(at: event) }
+    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+
+    private func updateShelfResizeCursor(at event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let edge: ShelfResizeEdge?
+        let horizontalEdge = point.x <= 20 ? ShelfResizeEdge.left : (point.x >= bounds.maxX - 20 ? .right : nil)
+        let verticalEdge = point.y <= 20 ? ShelfResizeEdge.bottom : (point.y >= bounds.maxY - 20 ? .top : nil)
+
+        switch (horizontalEdge, verticalEdge) {
+        case let (.some(horizontal), .some(vertical)):
+            switch (horizontal, vertical) {
+            case (.left, .top): edge = .topLeft
+            case (.right, .top): edge = .topRight
+            case (.left, .bottom): edge = .bottomLeft
+            default: edge = .bottomRight
+            }
+        case let (.some(horizontal), .none): edge = horizontal
+        case let (.none, .some(vertical)): edge = vertical
+        case (.none, .none): edge = nil
+        }
+
+        if let edge { shelfResizeCursor(at: edge).set() }
+        else { NSCursor.arrow.set() }
     }
-}
-
-private func installShelfResizeCursorRects(on view: NSView) {
-    let edgeThickness: CGFloat = 12
-    let cornerSize: CGFloat = 24
-    let bounds = view.bounds
-    let horizontalSpan = max(0, bounds.height - 2 * cornerSize)
-    let verticalSpan = max(0, bounds.width - 2 * cornerSize)
-
-    view.addCursorRect(NSRect(x: bounds.minX, y: bounds.minY + cornerSize, width: edgeThickness, height: horizontalSpan), cursor: shelfResizeCursor(at: .left))
-    view.addCursorRect(NSRect(x: bounds.maxX - edgeThickness, y: bounds.minY + cornerSize, width: edgeThickness, height: horizontalSpan), cursor: shelfResizeCursor(at: .right))
-    view.addCursorRect(NSRect(x: bounds.minX + cornerSize, y: bounds.minY, width: verticalSpan, height: edgeThickness), cursor: shelfResizeCursor(at: .bottom))
-    view.addCursorRect(NSRect(x: bounds.minX + cornerSize, y: bounds.maxY - edgeThickness, width: verticalSpan, height: edgeThickness), cursor: shelfResizeCursor(at: .top))
-    view.addCursorRect(NSRect(x: bounds.minX, y: bounds.minY, width: cornerSize, height: cornerSize), cursor: shelfResizeCursor(at: .bottomLeft))
-    view.addCursorRect(NSRect(x: bounds.maxX - cornerSize, y: bounds.minY, width: cornerSize, height: cornerSize), cursor: shelfResizeCursor(at: .bottomRight))
-    view.addCursorRect(NSRect(x: bounds.minX, y: bounds.maxY - cornerSize, width: cornerSize, height: cornerSize), cursor: shelfResizeCursor(at: .topLeft))
-    view.addCursorRect(NSRect(x: bounds.maxX - cornerSize, y: bounds.maxY - cornerSize, width: cornerSize, height: cornerSize), cursor: shelfResizeCursor(at: .topRight))
 }
 
 private func shelfResizeCursor(at edge: ShelfResizeEdge) -> NSCursor {
