@@ -101,7 +101,10 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
     }
 
-    func hide() { panel?.orderOut(nil) }
+    func hide() {
+        (panel?.contentView as? ShelfResizeCursorManaging)?.clearHoverCursor()
+        panel?.orderOut(nil)
+    }
 
     private func makePanelIfNeeded() -> NSPanel {
         if let panel { return panel }
@@ -504,7 +507,7 @@ struct ShelfView: View {
                     onClick: { select(item, modifiers: $0) },
                     onDroppedOutside: { ids in
                         store.removeItems(withIDs: Set(ids))
-                        onClose()
+                        if store.items.isEmpty { onClose() }
                     }
                 )
                 .help("Drag anywhere on this card to move the file")
@@ -756,8 +759,13 @@ private enum ShelfResizeEdge {
     case topLeft, topRight, bottomLeft, bottomRight
 }
 
-private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content> {
+private protocol ShelfResizeCursorManaging: AnyObject {
+    func clearHoverCursor()
+}
+
+private final class ResizableShelfHostingView<Content: View>: NSHostingView<Content>, ShelfResizeCursorManaging {
     private var shelfTrackingArea: NSTrackingArea?
+    private var resizeEventMonitor: Any?
     private var hoveredResizeEdge: ShelfResizeEdge?
     private var draggedResizeEdge: ShelfResizeEdge?
     private var hasPushedResizeCursor = false
@@ -777,37 +785,46 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         super.updateTrackingAreas()
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let windowPoint = convert(point, to: nil)
-        let screenPoint = window?.convertPoint(toScreen: windowPoint) ?? .zero
-        return resizeEdge(at: screenPoint) == nil ? super.hitTest(point) : self
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let resizeEventMonitor { NSEvent.removeMonitor(resizeEventMonitor) }
+        resizeEventMonitor = nil
+        guard window != nil else { return }
+        resizeEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            self?.handleResizeEvent(event) ?? event
+        }
     }
+
+    deinit { if let resizeEventMonitor { NSEvent.removeMonitor(resizeEventMonitor) } }
 
     override func mouseEntered(with event: NSEvent) { updateShelfResizeCursor() }
     override func mouseMoved(with event: NSEvent) { updateShelfResizeCursor() }
     override func mouseExited(with event: NSEvent) { restoreResizeCursor() }
 
-    override func mouseDown(with event: NSEvent) {
-        guard let window,
-              let edge = resizeEdge(at: NSEvent.mouseLocation) else {
-            super.mouseDown(with: event)
-            return
+    private func handleResizeEvent(_ event: NSEvent) -> NSEvent? {
+        if event.type == .leftMouseDown {
+            guard let window, event.window === window,
+                  let edge = resizeEdge(at: screenLocation(for: event)) else { return event }
+            draggedResizeEdge = edge
+            resizeStartPoint = screenLocation(for: event)
+            resizeStartFrame = window.frame
+            return nil
         }
-        draggedResizeEdge = edge
-        resizeStartPoint = NSEvent.mouseLocation
-        resizeStartFrame = window.frame
-    }
 
-    override func mouseDragged(with event: NSEvent) {
         guard let edge = draggedResizeEdge,
               let startPoint = resizeStartPoint,
               let startFrame = resizeStartFrame,
-              let window else {
-            super.mouseDragged(with: event)
-            return
+              let window else { return event }
+
+        if event.type == .leftMouseUp {
+            draggedResizeEdge = nil
+            resizeStartPoint = nil
+            resizeStartFrame = nil
+            updateShelfResizeCursor()
+            return nil
         }
 
-        let point = NSEvent.mouseLocation
+        let point = screenLocation(for: event)
         let dx = point.x - startPoint.x
         let dy = point.y - startPoint.y
         var frame = startFrame
@@ -840,26 +857,25 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
             if movesBottom { frame.origin.y = startFrame.maxY - window.minSize.height }
         }
         window.setFrame(frame, display: true)
+        return nil
     }
 
-    override func mouseUp(with event: NSEvent) {
-        draggedResizeEdge = nil
-        resizeStartPoint = nil
-        resizeStartFrame = nil
-        updateShelfResizeCursor()
+    private func screenLocation(for event: NSEvent) -> NSPoint {
+        guard let eventWindow = event.window else { return NSEvent.mouseLocation }
+        return eventWindow.convertPoint(toScreen: event.locationInWindow)
     }
 
     private func resizeEdge(at point: NSPoint) -> ShelfResizeEdge? {
         guard let window else { return nil }
         let frame = window.frame
-        let left = point.x <= frame.minX + 8
-        let right = point.x >= frame.maxX - 8
-        let bottom = point.y <= frame.minY + 8
-        let top = point.y >= frame.maxY - 8
-        let cornerLeft = point.x <= frame.minX + 12
-        let cornerRight = point.x >= frame.maxX - 12
-        let cornerBottom = point.y <= frame.minY + 12
-        let cornerTop = point.y >= frame.maxY - 12
+        let left = point.x <= frame.minX + 5
+        let right = point.x >= frame.maxX - 5
+        let bottom = point.y <= frame.minY + 5
+        let top = point.y >= frame.maxY - 5
+        let cornerLeft = point.x <= frame.minX + 10
+        let cornerRight = point.x >= frame.maxX - 10
+        let cornerBottom = point.y <= frame.minY + 10
+        let cornerTop = point.y >= frame.maxY - 10
 
         if cornerLeft && cornerTop { return .topLeft }
         if cornerRight && cornerTop { return .topRight }
@@ -891,6 +907,8 @@ private final class ResizableShelfHostingView<Content: View>: NSHostingView<Cont
         hasPushedResizeCursor = false
         hoveredResizeEdge = nil
     }
+
+    func clearHoverCursor() { restoreResizeCursor() }
 }
 
 private func shelfResizeCursor(at edge: ShelfResizeEdge) -> NSCursor {
