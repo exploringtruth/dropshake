@@ -4,25 +4,191 @@ import UniformTypeIdentifiers
 
 @main
 struct DropshakeApp: App {
-    @StateObject private var shelf = ShelfStore()
+    @StateObject private var runtime = DropshakeRuntime()
 
     var body: some Scene {
-        WindowGroup("Dropshake") {
-            ShelfView(store: shelf)
-                .frame(minWidth: 360, minHeight: 280)
-                .background(.ultraThinMaterial)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-
         MenuBarExtra("Dropshake", systemImage: "tray.and.arrow.down") {
-            Button("Open Shelf") { NSApp.activate(ignoringOtherApps: true) }
+            Button("Open Shelf") { runtime.showShelf() }
                 .keyboardShortcut("o")
-            Button("Clear Shelf") { shelf.clear() }
+            Button("Hide Shelf") { runtime.hideShelf() }
+            Button("Clear Shelf") { runtime.shelf.clear() }
+            Divider()
+            Button(runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open") {
+                runtime.toggleShake()
+            }
             Divider()
             Button("Quit Dropshake") { NSApp.terminate(nil) }
         }
         .menuBarExtraStyle(.menu)
+    }
+}
+
+@MainActor
+final class DropshakeRuntime: ObservableObject {
+    let shelf = ShelfStore()
+    private let shelfWindow: ShelfWindowController
+    private let shakeDetector: ShakeDetector
+    @Published private(set) var shakeEnabled: Bool
+
+    private let shakeEnabledKey = "dropshake.shakeEnabled"
+
+    init() {
+        let shelfWindow = ShelfWindowController(store: shelf)
+        let shakeDetector = ShakeDetector()
+        self.shelfWindow = shelfWindow
+        self.shakeDetector = shakeDetector
+        self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
+
+        shakeDetector.onShake = { [weak shelfWindow] in
+            shelfWindow?.show(near: NSEvent.mouseLocation)
+        }
+        shakeDetector.isEnabled = shakeEnabled
+        shakeDetector.start()
+    }
+
+    func showShelf() { shelfWindow.show(near: nil) }
+    func hideShelf() { shelfWindow.hide() }
+
+    func toggleShake() {
+        shakeEnabled.toggle()
+        UserDefaults.standard.set(shakeEnabled, forKey: shakeEnabledKey)
+        shakeDetector.isEnabled = shakeEnabled
+    }
+}
+
+@MainActor
+final class ShelfWindowController {
+    private let store: ShelfStore
+    private var panel: NSPanel?
+    private let panelSize = NSSize(width: 380, height: 330)
+
+    init(store: ShelfStore) { self.store = store }
+
+    func show(near point: NSPoint?) {
+        let panel = makePanelIfNeeded()
+        let target = point ?? NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(target) }) ?? NSScreen.main
+        let visibleFrame = screen?.visibleFrame ?? NSRect(origin: .zero, size: panelSize)
+        let origin = NSPoint(
+            x: min(max(target.x + 18, visibleFrame.minX), visibleFrame.maxX - panelSize.width),
+            y: min(max(target.y - panelSize.height / 2, visibleFrame.minY), visibleFrame.maxY - panelSize.height)
+        )
+        panel.setFrame(NSRect(origin: origin, size: panelSize), display: true)
+        panel.orderFrontRegardless()
+    }
+
+    func hide() { panel?.orderOut(nil) }
+
+    private func makePanelIfNeeded() -> NSPanel {
+        if let panel { return panel }
+
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: panelSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = NSHostingView(
+            rootView: ShelfView(store: store, onClose: { [weak self] in self?.hide() })
+                .frame(width: panelSize.width, height: panelSize.height)
+        )
+        self.panel = panel
+        return panel
+    }
+}
+
+@MainActor
+final class ShakeDetector {
+    var onShake: (() -> Void)?
+    var isEnabled = true
+
+    private var monitor: Any?
+    private var isDragging = false
+    private var hasTriggered = false
+    private var lastPoint: NSPoint?
+    private var gestureStart: TimeInterval = 0
+    private var previousAxis: Axis?
+    private var previousDirection = 0
+    private var reversals = 0
+    private var distance = 0.0
+
+    private enum Axis { case horizontal, vertical }
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            let type = event.type
+            let timestamp = event.timestamp
+            let point = NSEvent.mouseLocation
+            DispatchQueue.main.async {
+                self?.handle(type: type, timestamp: timestamp, point: point)
+            }
+        }
+    }
+
+    private func handle(type: NSEvent.EventType, timestamp: TimeInterval, point: NSPoint) {
+        switch type {
+        case .leftMouseDown:
+            isDragging = true
+            resetGesture(at: timestamp, point: point)
+            hasTriggered = false
+        case .leftMouseUp:
+            isDragging = false
+            lastPoint = nil
+            hasTriggered = false
+        case .leftMouseDragged:
+            guard isEnabled, isDragging, !hasTriggered else { return }
+            track(point: point, timestamp: timestamp)
+        default:
+            break
+        }
+    }
+
+    private func track(point: NSPoint, timestamp: TimeInterval) {
+        guard let previous = lastPoint else {
+            resetGesture(at: timestamp, point: point)
+            return
+        }
+
+        let deltaX = point.x - previous.x
+        let deltaY = point.y - previous.y
+        let step = hypot(deltaX, deltaY)
+        lastPoint = point
+
+        if timestamp - gestureStart > 0.7 {
+            resetGesture(at: timestamp, point: previous)
+        }
+        guard step >= 3 else { return }
+
+        let axis: Axis = abs(deltaX) >= abs(deltaY) ? .horizontal : .vertical
+        let direction = axis == .horizontal ? (deltaX > 0 ? 1 : -1) : (deltaY > 0 ? 1 : -1)
+        if axis == previousAxis, direction != previousDirection { reversals += 1 }
+        previousAxis = axis
+        previousDirection = direction
+        distance += step
+
+        if reversals >= 3, distance >= 72, timestamp - gestureStart <= 0.7 {
+            hasTriggered = true
+            onShake?()
+        }
+    }
+
+    private func resetGesture(at timestamp: TimeInterval, point: NSPoint) {
+        gestureStart = timestamp
+        lastPoint = point
+        previousAxis = nil
+        previousDirection = 0
+        reversals = 0
+        distance = 0
     }
 }
 
@@ -83,6 +249,7 @@ final class ShelfStore: ObservableObject {
 
 struct ShelfView: View {
     @ObservedObject var store: ShelfStore
+    let onClose: () -> Void
     @State private var isTargeted = false
 
     private let columns = [GridItem(.adaptive(minimum: 92), spacing: 12)]
@@ -120,6 +287,8 @@ struct ShelfView: View {
                 Button(action: store.clear) { Image(systemName: "trash") }
                     .buttonStyle(.plain).help("Clear shelf")
             }
+            Button(action: onClose) { Image(systemName: "xmark") }
+                .buttonStyle(.plain).help("Hide shelf")
         }
         .padding(.horizontal, 18).padding(.vertical, 14)
     }
@@ -169,8 +338,8 @@ struct ShelfView: View {
             Label("Files stay in their original locations", systemImage: "lock.fill")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
             Spacer()
-            Button { store.clear() } label: { Image(systemName: "plus") }
-                .buttonStyle(.bordered).controlSize(.small).help("Drop files onto the shelf to add them")
+            Text("Shake while dragging to open")
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
