@@ -233,10 +233,30 @@ final class ShakeDetector {
 struct ShelfItem: Identifiable, Codable, Equatable {
     var id: UUID
     var fileURL: URL?
+    var bookmarkData: Data?
     var text: String?
 
-    init(fileURL: URL) { self.id = UUID(); self.fileURL = fileURL; self.text = nil }
-    init(text: String) { self.id = UUID(); self.fileURL = nil; self.text = text }
+    init(fileURL: URL) {
+        self.id = UUID()
+        self.fileURL = fileURL
+        self.bookmarkData = try? fileURL.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        self.text = nil
+    }
+    init(text: String) { self.id = UUID(); self.fileURL = nil; self.bookmarkData = nil; self.text = text }
+
+    mutating func resolveFileURL() -> URL? {
+        guard let fileURL else { return nil }
+        guard let bookmarkData else { return fileURL }
+        var isStale = false
+        guard let resolved = try? URL(resolvingBookmarkData: bookmarkData, options: [], relativeTo: nil, bookmarkDataIsStale: &isStale) else {
+            return fileURL
+        }
+        self.fileURL = resolved
+        if isStale {
+            self.bookmarkData = try? resolved.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+        return resolved
+    }
     var name: String {
         if let fileURL { return fileURL.lastPathComponent }
         let value = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Text"
@@ -247,7 +267,7 @@ struct ShelfItem: Identifiable, Codable, Equatable {
         return fileURL.hasDirectoryPath ? "Folder" : fileURL.pathExtension.uppercased().isEmpty ? "File" : fileURL.pathExtension.uppercased()
     }
 
-    private enum CodingKeys: String, CodingKey { case id, fileURL, url, text }
+    private enum CodingKeys: String, CodingKey { case id, fileURL, url, bookmarkData, text }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -255,6 +275,7 @@ struct ShelfItem: Identifiable, Codable, Equatable {
         let currentURL = try values.decodeIfPresent(URL.self, forKey: .fileURL)
         let olderURL = try values.decodeIfPresent(URL.self, forKey: .url)
         fileURL = currentURL ?? olderURL
+        bookmarkData = try values.decodeIfPresent(Data.self, forKey: .bookmarkData)
         text = try values.decodeIfPresent(String.self, forKey: .text)
     }
 
@@ -262,6 +283,7 @@ struct ShelfItem: Identifiable, Codable, Equatable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(id, forKey: .id)
         try values.encodeIfPresent(fileURL, forKey: .fileURL)
+        try values.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
         try values.encodeIfPresent(text, forKey: .text)
     }
 }
@@ -304,7 +326,12 @@ final class ShelfStore: ObservableObject {
             .flatMap { try? decoder.decode([ShelfItem].self, from: $0) } ?? []
         let source = savedShelves.isEmpty ? [Shelf(name: "Shelf", items: migratedItems)] : savedShelves
         let cleaned = source.map { shelf in
-            Shelf(id: shelf.id, name: shelf.name, items: shelf.items.filter(Self.itemStillExists))
+            let items = shelf.items.compactMap { original -> ShelfItem? in
+                var item = original
+                guard let fileURL = item.resolveFileURL() else { return item.text == nil ? nil : item }
+                return FileManager.default.fileExists(atPath: fileURL.path) ? item : nil
+            }
+            return Shelf(id: shelf.id, name: shelf.name, items: items)
         }
         let nonEmpty = cleaned.isEmpty ? [Shelf(name: "Shelf")] : cleaned
         self.shelves = nonEmpty
@@ -381,11 +408,6 @@ final class ShelfStore: ObservableObject {
     }
 
     private var activeIndex: Int? { shelves.firstIndex(where: { $0.id == activeShelfID }) }
-
-    private static func itemStillExists(_ item: ShelfItem) -> Bool {
-        guard let fileURL = item.fileURL else { return item.text != nil }
-        return FileManager.default.fileExists(atPath: fileURL.path)
-    }
 
     private func save() {
         guard let shelvesData = try? JSONEncoder().encode(shelves) else { return }
