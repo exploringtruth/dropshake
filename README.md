@@ -4,7 +4,7 @@
 
 Dropshake is an independent project inspired by the general file-shelf workflow. It is not affiliated with Dropover and does not include Dropover code, artwork, or branding.
 
-[Download Dropshake for macOS](https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake-0.2.13.dmg)
+[Download Dropshake for macOS](https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake-0.2.14.dmg)
 
 ## What works today
 
@@ -22,6 +22,7 @@ Dropshake is an independent project inspired by the general file-shelf workflow.
 - Remember shelf contents across launches using macOS bookmarks for file references, so moved files can often be located again; the shelf does not copy or upload the files.
 - Move the floating shelf by dragging anywhere in its header.
 - Resize the floating shelf from its edges or corners; its size is remembered between launches.
+- Show horizontal, vertical, and diagonal resize cursors when hovering over shelf edges and corners.
 - Drag files and folders out using native macOS file URL transfers, including files without a known extension.
 - Display Finder icons, names, and file types.
 
@@ -51,7 +52,7 @@ On a Mac, from the project directory:
 bash ./scripts/build-dmg.sh
 ```
 
-This compiles a release build, creates `Dropshake.app` with the Dropshake app icon, and writes `Dropshake-0.2.13.dmg` in the project root. The DMG opens to a compact drag-to-install window with a clear arrow pointing to Applications. Override the version with `VERSION=1.0.0 bash ./scripts/build-dmg.sh`.
+This compiles a release build, creates `Dropshake.app` with the Dropshake app icon, and writes `Dropshake-0.2.14.dmg` in the project root. The DMG opens to a compact drag-to-install window with a clear arrow pointing to Applications. Override the version with `VERSION=1.0.0 bash ./scripts/build-dmg.sh`.
 
 The default package is ad-hoc signed for local use. Since it is not signed with an Apple Developer ID or notarized, Gatekeeper may block the first launch on another Mac. For a public download that opens without that warning, sign and notarize the app with an Apple Developer ID certificate before sharing. Set `CODE_SIGN_IDENTITY` to that certificate's identity and `NOTARY_PROFILE` to a profile created with `xcrun notarytool store-credentials` when packaging. The script submits and staples the DMG when `NOTARY_PROFILE` is set.
 
@@ -60,8 +61,8 @@ The default package is ad-hoc signed for local use. Since it is not signed with 
 Push this project to a GitHub repository, then push a version tag:
 
 ```sh
-git tag v0.2.13
-git push origin v0.2.13
+git tag v0.2.14
+git push origin v0.2.14
 ```
 
 The GitHub Actions workflow builds a macOS DMG and attaches it to a GitHub Release. Releases produced by the included workflow are ad-hoc signed; configure Developer ID signing, notarization credentials, and certificate import in CI before sharing them as a polished public download. A private GitHub repository limits release downloads to people with repository access.
