@@ -69,7 +69,19 @@ tell application "Finder"
 end tell
 APPLESCRIPT
 
-hdiutil detach "$MOUNT_POINT" >/dev/null
+sync
+detached=false
+for attempt in 1 2 3 4 5; do
+  if hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1; then
+    detached=true
+    break
+  fi
+  sleep 2
+done
+if [[ "$detached" != true ]]; then
+  echo "DMG is still busy; force detaching it." >&2
+  hdiutil detach -force "$MOUNT_POINT" >/dev/null
+fi
 hdiutil convert "$RW_DMG" -ov -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -f "$RW_DMG"
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
