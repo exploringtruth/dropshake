@@ -370,6 +370,12 @@ final class ShelfStore: ObservableObject {
         save()
     }
 
+    func removeItems(withIDs ids: Set<UUID>) {
+        guard let index = activeIndex, !ids.isEmpty else { return }
+        shelves[index].items.removeAll { ids.contains($0.id) }
+        save()
+    }
+
     func clear() {
         guard let index = activeIndex else { return }
         shelves[index].items.removeAll()
@@ -433,6 +439,8 @@ struct ShelfView: View {
     @State private var showingRename = false
     @State private var showingDeleteConfirmation = false
     @State private var shelfNameDraft = ""
+    @State private var selectedItemIDs: Set<UUID> = []
+    @State private var selectionAnchorID: UUID?
 
     private let columns = [GridItem(.adaptive(minimum: 92), spacing: 12)]
 
@@ -462,6 +470,10 @@ struct ShelfView: View {
             },
             onText: { store.add(text: $0) }
         ))
+        .onChange(of: store.activeShelfID) { _ in
+            selectedItemIDs.removeAll()
+            selectionAnchorID = nil
+        }
         .alert("Rename Shelf", isPresented: $showingRename) {
             TextField("Shelf name", text: $shelfNameDraft)
             Button("Cancel", role: .cancel) {}
@@ -477,10 +489,8 @@ struct ShelfView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            WindowDragHandle()
-                .frame(width: 18, height: 24)
-                .overlay(Image(systemName: "line.3.horizontal").font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary).allowsHitTesting(false))
-                .help("Drag to move shelf")
+            Image(systemName: "line.3.horizontal").font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary)
+                .help("Drag anywhere across the header to move shelf")
             Image(systemName: "tray.full.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.activeShelfName).font(.headline)
@@ -507,6 +517,7 @@ struct ShelfView: View {
                 .buttonStyle(.plain).help("Hide shelf")
         }
         .padding(.horizontal, 18).padding(.vertical, 14)
+        .background(WindowDragHandle())
     }
 
     private var emptyState: some View {
@@ -523,14 +534,14 @@ struct ShelfView: View {
     }
 
     private func itemCard(_ item: ShelfItem) -> some View {
-        let card = VStack(spacing: 7) {
+        let isSelected = selectedItemIDs.contains(item.id)
+        let dragItems = isSelected
+            ? store.items.filter { selectedItemIDs.contains($0.id) && $0.fileURL != nil }
+            : [item]
+
+        let content = VStack(spacing: 7) {
             if let fileURL = item.fileURL {
-                FileIcon(url: fileURL)
-                    .frame(height: 48)
-                    .allowsHitTesting(false)
-                    .overlay {
-                        NativeFileDragSource(fileURL: fileURL) { store.remove(item) }
-                    }
+                FileIcon(url: fileURL).frame(height: 48).allowsHitTesting(false)
             } else {
                 Image(systemName: item.kind == "Link" ? "link" : "text.alignleft")
                     .font(.system(size: 28, weight: .light)).foregroundStyle(.tint).frame(height: 48)
@@ -539,7 +550,38 @@ struct ShelfView: View {
             Text(item.kind).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 10).padding(.horizontal, 6)
-        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.accentColor.opacity(0.24) : Color.white.opacity(0.07))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+                .allowsHitTesting(false)
+        }
+
+        let selectable: AnyView
+        if item.fileURL != nil {
+            selectable = AnyView(content.overlay {
+                NativeFileDragSource(
+                    item: item,
+                    dragItems: dragItems,
+                    onClick: { select(item, modifiers: $0) },
+                    onDroppedOutside: { ids in
+                        store.removeItems(withIDs: Set(ids))
+                        onClose()
+                    }
+                )
+                .help("Drag anywhere on this card to move the file")
+            })
+        } else {
+            selectable = AnyView(content
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+                .onTapGesture { select(item, modifiers: NSEvent.modifierFlags) }
+                .onDrag { NSItemProvider(object: (item.text ?? item.name) as NSString) })
+        }
+
+        return AnyView(selectable
         .overlay(alignment: .topTrailing) {
             Button { store.remove(item) } label: {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 14)).symbolRenderingMode(.palette)
@@ -562,14 +604,26 @@ struct ShelfView: View {
             Divider()
             Button("Remove from Shelf") { store.remove(item) }
         }
-        .help("Drag \(item.name) out of the shelf")
+        .help("Click to select; drag to send to another app"))
+    }
 
-        if item.fileURL == nil {
-            return AnyView(card.onDrag {
-            NSItemProvider(object: (item.text ?? item.name) as NSString)
-            })
+    private func select(_ item: ShelfItem, modifiers: NSEvent.ModifierFlags) {
+        let visibleItems = store.items
+        guard let itemIndex = visibleItems.firstIndex(where: { $0.id == item.id }) else { return }
+
+        if modifiers.contains(.shift),
+           let anchorID = selectionAnchorID,
+           let anchorIndex = visibleItems.firstIndex(where: { $0.id == anchorID }) {
+            let range = min(anchorIndex, itemIndex)...max(anchorIndex, itemIndex)
+            selectedItemIDs = Set(range.map { visibleItems[$0].id })
+        } else if modifiers.contains(.command) {
+            if selectedItemIDs.contains(item.id) { selectedItemIDs.remove(item.id) }
+            else { selectedItemIDs.insert(item.id) }
+            selectionAnchorID = item.id
+        } else {
+            selectedItemIDs = [item.id]
+            selectionAnchorID = item.id
         }
-        return AnyView(card)
     }
 
     private func copyToClipboard(_ value: String) {
@@ -591,19 +645,26 @@ struct ShelfView: View {
 }
 
 private struct NativeFileDragSource: NSViewRepresentable {
-    let fileURL: URL
-    let onMove: () -> Void
+    let item: ShelfItem
+    let dragItems: [ShelfItem]
+    let onClick: (NSEvent.ModifierFlags) -> Void
+    let onDroppedOutside: ([UUID]) -> Void
 
     func makeNSView(context: Context) -> FileDragSourceView {
         let view = FileDragSourceView()
-        view.fileURL = fileURL
-        view.onMove = onMove
+        update(view)
         return view
     }
 
     func updateNSView(_ view: FileDragSourceView, context: Context) {
-        view.fileURL = fileURL
-        view.onMove = onMove
+        update(view)
+    }
+
+    private func update(_ view: FileDragSourceView) {
+        view.item = item
+        view.dragItems = dragItems
+        view.onClick = onClick
+        view.onDroppedOutside = onDroppedOutside
     }
 }
 
@@ -687,32 +748,47 @@ private final class ShelfDropTargetView: NSView {
 }
 
 private final class FileDragSourceView: NSView, NSDraggingSource {
-    var fileURL: URL?
-    var onMove: (() -> Void)?
+    var item: ShelfItem?
+    var dragItems: [ShelfItem] = []
+    var onClick: ((NSEvent.ModifierFlags) -> Void)?
+    var onDroppedOutside: ([UUID]) -> Void = { _ in }
     private var mouseDownPoint: NSPoint?
+    private var mouseDownModifiers: NSEvent.ModifierFlags = []
     private var didStartDrag = false
+    private var activeDragIDs: [UUID] = []
+    private var dragIsExternal = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         mouseDownPoint = convert(event.locationInWindow, from: nil)
+        mouseDownModifiers = event.modifierFlags
         didStartDrag = false
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard !didStartDrag,
-              let fileURL,
+              let item,
               let mouseDownPoint else { return }
         let currentPoint = convert(event.locationInWindow, from: nil)
         guard hypot(currentPoint.x - mouseDownPoint.x, currentPoint.y - mouseDownPoint.y) >= 4 else { return }
 
         didStartDrag = true
-        let draggingItem = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
-        draggingItem.setDraggingFrame(bounds, contents: NSWorkspace.shared.icon(forFile: fileURL.path))
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
+        let filesToDrag = dragItems.contains(where: { $0.id == item.id }) ? dragItems : [item]
+        let fileItems = filesToDrag.filter { $0.fileURL != nil }
+        activeDragIDs = fileItems.map(\.id)
+        let draggingItems = fileItems.compactMap { shelfItem -> NSDraggingItem? in
+            guard let fileURL = shelfItem.fileURL else { return nil }
+            let draggingItem = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
+            draggingItem.setDraggingFrame(bounds, contents: NSWorkspace.shared.icon(forFile: fileURL.path))
+            return draggingItem
+        }
+        guard !draggingItems.isEmpty else { return }
+        beginDraggingSession(with: draggingItems, event: event, source: self)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if !didStartDrag, let item { onClick?(mouseDownModifiers) }
         mouseDownPoint = nil
         didStartDrag = false
     }
@@ -722,11 +798,16 @@ private final class FileDragSourceView: NSView, NSDraggingSource {
     }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        dragIsExternal = context == .outsideApplication
         [.copy, .move, .link]
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        if operation == .move { onMove?() }
+        if dragIsExternal, !operation.isEmpty, !activeDragIDs.isEmpty {
+            onDroppedOutside(activeDragIDs)
+        }
+        activeDragIDs = []
+        dragIsExternal = false
     }
 }
 
