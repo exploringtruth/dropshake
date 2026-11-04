@@ -463,7 +463,21 @@ struct ShelfView: View {
                 .buttonStyle(.plain).focusable(false).help("Hide shelf")
         }
         .padding(.horizontal, 30).padding(.vertical, 14)
-        .background(WindowDragHandle())
+        .background {
+            GeometryReader { proxy in
+                let topInset: CGFloat = 12
+                let sideInset: CGFloat = 16
+                WindowDragHandle()
+                    .frame(
+                        width: max(0, proxy.size.width - sideInset * 2),
+                        height: max(0, proxy.size.height - topInset)
+                    )
+                    .position(
+                        x: proxy.size.width / 2,
+                        y: (proxy.size.height + topInset) / 2
+                    )
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -767,19 +781,6 @@ private final class WindowDragView: NSView {
     private var initialWindowOrigin: NSPoint?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let window else { return nil }
-        let pointer = NSEvent.mouseLocation
-        let frame = window.frame
-        let resizeInset: CGFloat = 18
-        if pointer.x <= frame.minX + resizeInset
-            || pointer.x >= frame.maxX - resizeInset
-            || pointer.y >= frame.maxY - resizeInset {
-            return nil
-        }
-        return super.hitTest(point)
-    }
 
     override func mouseDown(with event: NSEvent) {
         initialMouseLocation = NSEvent.mouseLocation
