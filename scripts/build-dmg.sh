@@ -65,13 +65,14 @@ tell application "Finder"
     set current view of dmgWindow to icon view
     set toolbar visible of dmgWindow to false
     set statusbar visible of dmgWindow to false
-    set bounds of dmgWindow to {120, 120, 1100, 800}
+    set bounds of dmgWindow to {120, 120, 1020, 720}
     set iconOptions to icon view options of dmgWindow
-    set icon size of iconOptions to 128
+    set icon size of iconOptions to 160
+    set text size of iconOptions to 14
     set arrangement of iconOptions to not arranged
     set background picture of iconOptions to POSIX file "$MOUNT_POINT/.background/background.png"
-    set position of item "$APP_NAME.app" of dmgWindow to {246, 326}
-    set position of item "Applications" of dmgWindow to {734, 326}
+    set position of item "$APP_NAME.app" of dmgWindow to {225, 245}
+    set position of item "Applications" of dmgWindow to {675, 245}
     delay 2
     close dmgWindow
 end tell

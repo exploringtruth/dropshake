@@ -1,4 +1,6 @@
 import AppKit
+import Carbon
+import QuickLookThumbnailing
 import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -11,7 +13,6 @@ struct DropshakeApp: App {
     var body: some Scene {
         MenuBarExtra(isInserted: $isMenuBarExtraInserted) {
             Button("Open Shelf") { runtime.showShelf() }
-                .keyboardShortcut("o")
             Button("Add Clipboard Contents") { runtime.captureClipboard() }
             Button("Hide Shelf") { runtime.hideShelf() }
             Button("Clear Shelf") { runtime.shelf.clear() }
@@ -79,6 +80,8 @@ final class DropshakeRuntime: ObservableObject {
     private let shelfWindow: ShelfWindowController
     private let shakeDetector: ShakeDetector
     @Published private(set) var shakeEnabled: Bool
+    private var openShelfHotKey: EventHotKeyRef?
+    private var openShelfEventHandler: EventHandlerRef?
 
     private let shakeEnabledKey = "dropshake.shakeEnabled"
 
@@ -88,6 +91,7 @@ final class DropshakeRuntime: ObservableObject {
         self.shelfWindow = shelfWindow
         self.shakeDetector = shakeDetector
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
+        registerOpenShelfHotKey()
 
         shakeDetector.onShake = { [weak self, weak shelfWindow] in
             self?.shelf.clear()
@@ -97,7 +101,10 @@ final class DropshakeRuntime: ObservableObject {
         shakeDetector.start()
     }
 
-    func showShelf() { shelfWindow.show(near: nil) }
+    func showShelf() {
+        shelf.clear()
+        shelfWindow.show(near: nil)
+    }
     func hideShelf() { shelfWindow.hide() }
     func captureClipboard() {
         let pasteboard = NSPasteboard.general
@@ -118,6 +125,47 @@ final class DropshakeRuntime: ObservableObject {
         shakeEnabled.toggle()
         UserDefaults.standard.set(shakeEnabled, forKey: shakeEnabledKey)
         shakeDetector.isEnabled = shakeEnabled
+    }
+
+    private func registerOpenShelfHotKey() {
+        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let callback: EventHandlerProcPtr = { _, event, userData in
+            guard let event, let userData else { return noErr }
+            var pressedHotKey = EventHotKeyID()
+            let status = GetEventParameter(
+                event,
+                EventParamName(kEventParamDirectObject),
+                EventParamType(typeEventHotKeyID),
+                nil,
+                MemoryLayout<EventHotKeyID>.size,
+                nil,
+                &pressedHotKey
+            )
+            guard status == noErr, pressedHotKey.id == 1 else { return noErr }
+            let runtime = Unmanaged<DropshakeRuntime>.fromOpaque(userData).takeUnretainedValue()
+            Task { @MainActor in runtime.showShelf() }
+            return noErr
+        }
+
+        let handlerStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            callback,
+            1,
+            &eventType,
+            UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
+            &openShelfEventHandler
+        )
+        guard handlerStatus == noErr else { return }
+
+        let hotKeyID = EventHotKeyID(signature: OSType(0x4453686B), id: 1)
+        RegisterEventHotKey(
+            UInt32(kVK_ANSI_E),
+            UInt32(cmdKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &openShelfHotKey
+        )
     }
 }
 
@@ -469,6 +517,9 @@ struct ShelfView: View {
     @State private var isTargeted = false
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectionAnchorID: UUID?
+    @State private var observedItemIDs: Set<UUID> = []
+    @State private var itemFrames: [UUID: CGRect] = [:]
+    @State private var selectionMarquee: CGRect?
 
     private let columns = [GridItem(.adaptive(minimum: 92), spacing: 12)]
 
@@ -477,16 +528,58 @@ struct ShelfView: View {
             header
             if store.items.isEmpty { emptyState }
             else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(store.items) { item in itemCard(item) }
+                GeometryReader { geometry in
+                    ScrollView {
+                        ZStack(alignment: .topLeading) {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .gesture(
+                                    DragGesture(minimumDistance: 0, coordinateSpace: .named("shelfScroll"))
+                                        .onChanged { value in
+                                            let rect = selectionRect(from: value.startLocation, to: value.location)
+                                            selectionMarquee = rect
+                                            selectedItemIDs = Set(itemFrames.compactMap { id, frame in
+                                                frame.intersects(rect) ? id : nil
+                                            })
+                                            selectionAnchorID = nil
+                                        }
+                                        .onEnded { value in
+                                            let distance = hypot(
+                                                value.location.x - value.startLocation.x,
+                                                value.location.y - value.startLocation.y
+                                            )
+                                            if distance < 4 {
+                                                clearSelection()
+                                            } else {
+                                                let rect = selectionRect(from: value.startLocation, to: value.location)
+                                                selectedItemIDs = Set(itemFrames.compactMap { id, frame in
+                                                    frame.intersects(rect) ? id : nil
+                                                })
+                                            }
+                                            selectionMarquee = nil
+                                        }
+                                )
+                                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                ForEach(store.items) { item in itemCard(item) }
+                            }
+                            .padding(16)
+                            if let selectionMarquee {
+                                Rectangle()
+                                    .fill(Color.accentColor.opacity(0.18))
+                                    .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1))
+                                    .frame(width: selectionMarquee.width, height: selectionMarquee.height)
+                                    .offset(x: selectionMarquee.minX, y: selectionMarquee.minY)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     }
-                    .padding(16)
+                    .coordinateSpace(name: "shelfScroll")
                 }
             }
             footer
         }
-        .background(isTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor).opacity(0.82))
+        .background(isTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor).opacity(0.94))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18)))
         .background(ShelfDropTarget(
@@ -498,6 +591,29 @@ struct ShelfView: View {
             },
             onText: { store.add(text: $0) }
         ))
+        .onAppear {
+            let itemIDs = store.items.map(\.id)
+            observedItemIDs = Set(itemIDs)
+            if itemIDs.count > 1 {
+                selectedItemIDs = Set(itemIDs)
+                selectionAnchorID = itemIDs.last
+            }
+        }
+        .onChange(of: store.items.map(\.id)) { itemIDs in
+            let currentIDs = Set(itemIDs)
+            let incomingIDs = currentIDs.subtracting(observedItemIDs)
+            if !incomingIDs.isEmpty {
+                selectedItemIDs = currentIDs.count > 1 ? currentIDs : []
+                selectionAnchorID = itemIDs.last
+            } else {
+                selectedItemIDs.formIntersection(currentIDs)
+                if let selectionAnchorID, !currentIDs.contains(selectionAnchorID) {
+                    self.selectionAnchorID = itemIDs.last
+                }
+            }
+            observedItemIDs = currentIDs
+        }
+        .onPreferenceChange(ShelfItemFramesKey.self) { itemFrames = $0 }
     }
 
     private var header: some View {
@@ -524,16 +640,26 @@ struct ShelfView: View {
             GeometryReader { proxy in
                 // Keep the drag target clear of AppKit's native resize border.
                 let topInset: CGFloat = 10
+                let bottomInset: CGFloat = 20
+                let dragHeight = max(0, proxy.size.height - topInset - bottomInset)
                 let sideInset: CGFloat = 10
-                WindowDragHandle()
-                    .frame(
-                        width: max(0, proxy.size.width - sideInset * 2),
-                        height: max(0, proxy.size.height - topInset)
-                    )
-                    .position(
-                        x: proxy.size.width / 2,
-                        y: (proxy.size.height + topInset) / 2
-                    )
+                ZStack {
+                    WindowDragHandle()
+                        .frame(
+                            width: max(0, proxy.size.width - sideInset * 2),
+                            height: dragHeight
+                        )
+                        .position(
+                            x: proxy.size.width / 2,
+                            y: topInset + dragHeight / 2
+                        )
+                    SelectionClearHandle(onClick: clearSelection)
+                        .frame(width: max(0, proxy.size.width - sideInset * 2), height: bottomInset)
+                        .position(
+                            x: proxy.size.width / 2,
+                            y: proxy.size.height - bottomInset / 2
+                        )
+                }
             }
         }
     }
@@ -623,6 +749,14 @@ struct ShelfView: View {
             Button("Remove from Shelf") { store.remove(item) }
         }
         .help("Click to select; drag to send to another app"))
+        .overlay {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: ShelfItemFramesKey.self,
+                    value: [item.id: geometry.frame(in: .named("shelfScroll"))]
+                )
+            }
+        }
     }
 
     private func select(_ item: ShelfItem, modifiers: NSEvent.ModifierFlags) {
@@ -644,6 +778,20 @@ struct ShelfView: View {
         }
     }
 
+    private func clearSelection() {
+        selectedItemIDs.removeAll()
+        selectionAnchorID = nil
+    }
+
+    private func selectionRect(from start: CGPoint, to current: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, current.x),
+            y: min(start.y, current.y),
+            width: abs(current.x - start.x),
+            height: abs(current.y - start.y)
+        )
+    }
+
     private func copyToClipboard(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
@@ -660,6 +808,14 @@ struct ShelfView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
+}
+
+private struct ShelfItemFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
 }
 
 private struct NativeFileDragSource: NSViewRepresentable {
@@ -834,6 +990,18 @@ private struct WindowDragHandle: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+private struct SelectionClearHandle: NSViewRepresentable {
+    let onClick: () -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        SelectionClearView(onClick: onClick)
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? SelectionClearView)?.onClick = onClick
+    }
+}
+
 private enum ShelfResizeEdge {
     case left, right, top, bottom
     case topLeft, topRight, bottomLeft, bottomRight
@@ -851,8 +1019,9 @@ private final class ResizableShelfContainerView: NSView {
     private var resizeStartFrame: NSRect?
 
     private let edgeThickness: CGFloat = 10
-    private let topEdgeThickness: CGFloat = 44
+    private let topEdgeThickness: CGFloat = 36
     private let cornerThickness: CGFloat = 36
+    private let topCornerThickness: CGFloat = 64
 
     override var isFlipped: Bool { true }
 
@@ -974,7 +1143,7 @@ private final class ResizableShelfContainerView: NSView {
 
         let nearLeft = distanceFromLeft <= cornerThickness
         let nearRight = distanceFromRight <= cornerThickness
-        let nearTop = distanceFromTop <= cornerThickness
+        let nearTop = distanceFromTop <= topCornerThickness
         let nearBottom = distanceFromBottom <= cornerThickness
 
         if nearTop && nearLeft { return .topLeft }
@@ -1056,6 +1225,23 @@ private final class WindowDragView: NSView {
     }
 }
 
+private final class SelectionClearView: NSView {
+    var onClick: () -> Void
+
+    init(onClick: @escaping () -> Void) {
+        self.onClick = onClick
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick()
+    }
+}
+
 @MainActor
 private final class QuickLookController: NSObject, QLPreviewPanelDataSource {
     static let shared = QuickLookController()
@@ -1079,14 +1265,24 @@ private final class QuickLookController: NSObject, QLPreviewPanelDataSource {
 
 private struct FileIcon: View {
     let url: URL
+    @State private var thumbnail: NSImage?
+
     var body: some View {
-        Group {
-            if let image = NSWorkspace.shared.icon(forFile: url.path) as NSImage? {
-                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: "doc")
-            }
-        }
+        Image(nsImage: thumbnail ?? NSWorkspace.shared.icon(forFile: url.path))
+            .resizable()
+            .aspectRatio(contentMode: .fit)
         .padding(2)
+        .task(id: url) {
+            let request = QLThumbnailGenerator.Request(
+                fileAt: url,
+                size: NSSize(width: 128, height: 128),
+                scale: NSScreen.main?.backingScaleFactor ?? 2,
+                representationTypes: .thumbnail
+            )
+            guard let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) else {
+                return
+            }
+            thumbnail = representation.nsImage
+        }
     }
 }
