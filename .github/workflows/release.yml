@@ -43,6 +43,10 @@ jobs:
             --ed-key-file - \
             --download-url-prefix "https://github.com/exploringtruth/dropshake/releases/download/$GITHUB_REF_NAME/" \
             "$UPDATE_DIR"
+          if ! grep -q 'sparkle:edSignature=' "$UPDATE_DIR/appcast.xml"; then
+            echo "Generated appcast has no EdDSA archive signature; check the Sparkle public/private key pairing." >&2
+            exit 1
+          fi
           cp "$UPDATE_DIR/appcast.xml" appcast.xml
           cp "$UPDATE_DIR/Dropshake-$VERSION.zip" .
       - name: Create stable download name
@@ -53,7 +57,13 @@ jobs:
         run: |
           RELEASE_NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
           if [[ -f "$RELEASE_NOTES" ]]; then
-            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml --notes-file "$RELEASE_NOTES" --title "Dropshake $GITHUB_REF_NAME"
+            RELEASE_ARGS=(--notes-file "$RELEASE_NOTES" --title "Dropshake $GITHUB_REF_NAME")
           else
-            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml --generate-notes --title "Dropshake $GITHUB_REF_NAME"
+            RELEASE_ARGS=(--generate-notes --title "Dropshake $GITHUB_REF_NAME")
+          fi
+          ASSETS=("Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" "${RELEASE_ARGS[@]}"
           fi
