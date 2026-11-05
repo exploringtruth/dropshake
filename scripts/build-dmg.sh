@@ -28,9 +28,21 @@ ARM64_BIN_DIR="$(swift build --show-bin-path -c "$CONFIGURATION" --triple arm64-
 X86_64_BIN_DIR="$(swift build --show-bin-path -c "$CONFIGURATION" --triple x86_64-apple-macosx13.0 --scratch-path "$X86_64_BUILD_DIR")"
 lipo -create "$ARM64_BIN_DIR/$APP_NAME" "$X86_64_BIN_DIR/$APP_NAME" -output "$BUILD_DIR/$APP_NAME-universal"
 echo "Universal binary: $(lipo -archs "$BUILD_DIR/$APP_NAME-universal")"
+rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILD_DIR/$APP_NAME-universal" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
+SPARKLE_FRAMEWORK="$(find "$BUILD_DIR" -type d -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
+if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
+  echo "Sparkle.framework was not found in $BUILD_DIR; resolve the Sparkle package first." >&2
+  exit 1
+fi
+mkdir -p "$APP/Contents/Frameworks"
+cp -R "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
+if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
+  /usr/libexec/PlistBuddy -c 'Add :SUFeedURL string https://github.com/exploringtruth/dropshake/releases/latest/download/appcast.xml' "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
+fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 rm -rf "$ICONSET"

@@ -1,7 +1,9 @@
 import AppKit
 import Carbon
+import Foundation
 import QuickLookThumbnailing
 import QuickLookUI
+import Sparkle
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,6 +18,9 @@ struct DropshakeApp: App {
             Button("Add Clipboard Contents") { runtime.captureClipboard() }
             Button("Hide Shelf") { runtime.hideShelf() }
             Button("Clear Shelf") { runtime.shelf.clear() }
+            Divider()
+            Button("Get Latest Version") { runtime.getLatestVersion() }
+            Button("Check for Updates") { runtime.checkForUpdates() }
             Divider()
             Button(runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open") {
                 runtime.toggleShake()
@@ -79,6 +84,7 @@ final class DropshakeRuntime: ObservableObject {
     let shelf = ShelfStore()
     private let shelfWindow: ShelfWindowController
     private let shakeDetector: ShakeDetector
+    private let updaterController: SPUStandardUpdaterController?
     @Published private(set) var shakeEnabled: Bool
     private var openShelfHotKey: EventHotKeyRef?
     private var openShelfEventHandler: EventHandlerRef?
@@ -88,8 +94,15 @@ final class DropshakeRuntime: ObservableObject {
     init() {
         let shelfWindow = ShelfWindowController(store: shelf)
         let shakeDetector = ShakeDetector()
+        // Development builds without the release signing key remain usable;
+        // Sparkle is started only in packages configured with a signed feed.
+        let hasUpdateFeed = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String != nil
+        let updaterController = hasUpdateFeed
+            ? SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+            : nil
         self.shelfWindow = shelfWindow
         self.shakeDetector = shakeDetector
+        self.updaterController = updaterController
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
         registerOpenShelfHotKey()
 
@@ -106,6 +119,69 @@ final class DropshakeRuntime: ObservableObject {
         shelfWindow.show(near: nil)
     }
     func hideShelf() { shelfWindow.hide() }
+    func getLatestVersion() {
+        guard let updaterController else {
+            let alert = NSAlert()
+            alert.messageText = "In-app updates are not configured in this build"
+            alert.informativeText = "Install the latest Dropshake release manually."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        updaterController.checkForUpdates(nil)
+    }
+
+    func checkForUpdates() {
+        Task { @MainActor in
+            do {
+                let url = URL(string: "https://api.github.com/repos/exploringtruth/dropshake/releases/latest")!
+                var request = URLRequest(url: url)
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                request.setValue("Dropshake", forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let response = response as? HTTPURLResponse,
+                      (200..<300).contains(response.statusCode) else {
+                    throw UpdateCheckError.invalidResponse
+                }
+
+                let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+                let latestVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
+                let alert = NSAlert()
+                guard let installedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String else {
+                    alert.messageText = "Latest release: Dropshake \(latestVersion)"
+                    alert.informativeText = "This development build has no release version, so it can’t compare updates. Use an installed release to update in the app."
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                    return
+                }
+
+                switch latestVersion.compare(installedVersion, options: .numeric) {
+                case .orderedDescending:
+                    alert.messageText = "Dropshake \(latestVersion) is available"
+                    alert.informativeText = "You’re running version \(installedVersion). Choose Get Latest Version from the menu bar to install the update."
+                case .orderedSame:
+                    alert.messageText = "Dropshake is up to date"
+                    alert.informativeText = "You’re running the latest version, \(installedVersion)."
+                case .orderedAscending:
+                    alert.messageText = "This build is newer than the latest release"
+                    alert.informativeText = "You’re running version \(installedVersion). The latest published release is version \(latestVersion)."
+                }
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Couldn’t check for updates"
+                alert.informativeText = "Check your internet connection and try again."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
     func captureClipboard() {
         let pasteboard = NSPasteboard.general
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [NSURL] ?? []
@@ -167,6 +243,16 @@ final class DropshakeRuntime: ObservableObject {
             &openShelfHotKey
         )
     }
+}
+
+private struct GitHubRelease: Decodable {
+    let tagName: String
+
+    enum CodingKeys: String, CodingKey { case tagName = "tag_name" }
+}
+
+private enum UpdateCheckError: Error {
+    case invalidResponse
 }
 
 @MainActor

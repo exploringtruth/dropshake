@@ -13,7 +13,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build app and DMG
-        run: VERSION="${GITHUB_REF_NAME#v}" bash ./scripts/build-dmg.sh
+        env:
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PUBLIC_ED_KEY" ]]; then
+            echo "Set the SPARKLE_PUBLIC_ED_KEY repository variable before publishing an updater-enabled release." >&2
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}" bash ./scripts/build-dmg.sh
+      - name: Prepare signed Sparkle update feed
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_PRIVATE_ED_KEY" ]]; then
+            echo "Set the SPARKLE_PRIVATE_ED_KEY repository secret before publishing an updater-enabled release." >&2
+            exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          UPDATE_DIR="$RUNNER_TEMP/dropshake-updates"
+          mkdir -p "$UPDATE_DIR"
+          ditto -c -k --sequesterRsrc --keepParent ".build/Dropshake.app" "$UPDATE_DIR/Dropshake-$VERSION.zip"
+          SPARKLE_GENERATE_APPCAST="$(find .build -type f -path '*/Sparkle/bin/generate_appcast' -print -quit)"
+          if [[ -z "$SPARKLE_GENERATE_APPCAST" ]]; then
+            echo "Sparkle generate_appcast was not found in the build artifacts." >&2
+            exit 1
+          fi
+          SPARKLE_TOOLS="${SPARKLE_GENERATE_APPCAST%/generate_appcast}"
+          printf '%s' "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_TOOLS/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/exploringtruth/dropshake/releases/download/$GITHUB_REF_NAME/" \
+            "$UPDATE_DIR"
+          cp "$UPDATE_DIR/appcast.xml" appcast.xml
+          cp "$UPDATE_DIR/Dropshake-$VERSION.zip" .
       - name: Create stable download name
         run: cp "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg
       - name: Publish GitHub release
@@ -22,7 +53,7 @@ jobs:
         run: |
           RELEASE_NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
           if [[ -f "$RELEASE_NOTES" ]]; then
-            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg --notes-file "$RELEASE_NOTES" --title "Dropshake $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml --notes-file "$RELEASE_NOTES" --title "Dropshake $GITHUB_REF_NAME"
           else
-            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg --generate-notes --title "Dropshake $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml --generate-notes --title "Dropshake $GITHUB_REF_NAME"
           fi
