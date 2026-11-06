@@ -263,6 +263,8 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
     private let minimumPanelSize = NSSize(width: 300, height: 240)
     private let savedWidthKey = "dropshake.shelfWindow.width"
     private let savedHeightKey = "dropshake.shelfWindow.height"
+    private var visibilityAnimationID = 0
+    private let visibilityAnimationDuration: TimeInterval = 0.18
 
     init(store: ShelfStore) {
         self.store = store
@@ -271,6 +273,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
 
     func show(near point: NSPoint?, resetToDefaultSize: Bool = false) {
         let panel = makePanelIfNeeded()
+        visibilityAnimationID += 1
         if resetToDefaultSize {
             panel.setContentSize(defaultPanelSize)
             UserDefaults.standard.set(Double(defaultPanelSize.width), forKey: savedWidthKey)
@@ -285,10 +288,31 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
             y: min(max(target.y - size.height / 2, visibleFrame.minY), visibleFrame.maxY - size.height)
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        if !panel.isVisible {
+            panel.alphaValue = 0
+        }
         panel.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = visibilityAnimationDuration
+            panel.animator().alphaValue = 1
+        }
     }
 
-    func hide() { panel?.orderOut(nil) }
+    func hide() {
+        guard let panel, panel.isVisible else { return }
+        visibilityAnimationID += 1
+        let animationID = visibilityAnimationID
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = visibilityAnimationDuration
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self, weak panel] in
+            Task { @MainActor [weak self, weak panel] in
+                guard let self, let panel, self.visibilityAnimationID == animationID else { return }
+                panel.orderOut(nil)
+                panel.alphaValue = 1
+            }
+        })
+    }
 
     private func makePanelIfNeeded() -> NSPanel {
         if let panel { return panel }
@@ -1107,7 +1131,8 @@ private final class ResizableShelfContainerView: NSView {
     private let edgeThickness: CGFloat = 10
     private let topEdgeThickness: CGFloat = 36
     private let cornerThickness: CGFloat = 36
-    private let topCornerThickness: CGFloat = 64
+    private let topCornerWidth: CGFloat = 28
+    private let topCornerThickness: CGFloat = 56
 
     override var isFlipped: Bool { true }
 
@@ -1229,11 +1254,13 @@ private final class ResizableShelfContainerView: NSView {
 
         let nearLeft = distanceFromLeft <= cornerThickness
         let nearRight = distanceFromRight <= cornerThickness
+        let nearTopLeft = distanceFromLeft <= topCornerWidth
+        let nearTopRight = distanceFromRight <= topCornerWidth
         let nearTop = distanceFromTop <= topCornerThickness
         let nearBottom = distanceFromBottom <= cornerThickness
 
-        if nearTop && nearLeft { return .topLeft }
-        if nearTop && nearRight { return .topRight }
+        if nearTop && nearTopLeft { return .topLeft }
+        if nearTop && nearTopRight { return .topRight }
         if nearBottom && nearLeft { return .bottomLeft }
         if nearBottom && nearRight { return .bottomRight }
         if distanceFromLeft <= edgeThickness { return .left }

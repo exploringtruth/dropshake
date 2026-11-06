@@ -21,7 +21,7 @@ Version 1.2.0 is the first release with in-app updates. Install it manually once
 
 ## Install
 
-Download the [latest DMG](https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake.dmg), open it, then drag **Dropshake** into **Applications**.
+Download the [latest DMG](https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake.dmg), open it, drag **Dropshake** into **Applications**, then eject the **Dropshake** disk in Finder.
 
 Requires macOS 13 or later. The app is currently ad-hoc signed, so macOS may ask you to confirm it the first time you open it.
 
