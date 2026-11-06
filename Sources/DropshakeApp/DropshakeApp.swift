@@ -264,7 +264,7 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
     private let savedWidthKey = "dropshake.shelfWindow.width"
     private let savedHeightKey = "dropshake.shelfWindow.height"
     private var visibilityAnimationID = 0
-    private let visibilityAnimationDuration: TimeInterval = 0.18
+    private let visibilityAnimationDuration: TimeInterval = 0.24
 
     init(store: ShelfStore) {
         self.store = store
@@ -377,8 +377,8 @@ final class ShelfWindowController: NSObject, NSWindowDelegate {
 
 @MainActor
 final class ShakeDetector {
-    private let gestureWindow: TimeInterval = 0.4
-    private let minimumShakeDistance: Double = 30
+    private let gestureWindow: TimeInterval = 0.55
+    private let minimumShakeDistance: Double = 20
     private let minimumDirectionReversals = 2
 
     var onShake: (() -> Void)?
@@ -630,13 +630,29 @@ struct ShelfView: View {
     @State private var observedItemIDs: Set<UUID> = []
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var selectionMarquee: CGRect?
+    @State private var searchText = ""
 
     private let columns = [GridItem(.adaptive(minimum: 92), spacing: 12)]
+
+    private var filteredItems: [ShelfItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return store.items }
+
+        let typeQuery = query.hasPrefix(".") ? String(query.dropFirst()) : query
+        return store.items.filter { item in
+            item.name.localizedCaseInsensitiveContains(query)
+                || (!typeQuery.isEmpty && (
+                    item.kind.localizedCaseInsensitiveContains(typeQuery)
+                        || item.fileURL?.pathExtension.localizedCaseInsensitiveContains(typeQuery) == true
+                ))
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             if store.items.isEmpty { emptyState }
+            else if filteredItems.isEmpty { noSearchResults }
             else {
                 GeometryReader { geometry in
                     ScrollView {
@@ -648,9 +664,7 @@ struct ShelfView: View {
                                         .onChanged { value in
                                             let rect = selectionRect(from: value.startLocation, to: value.location)
                                             selectionMarquee = rect
-                                            selectedItemIDs = Set(itemFrames.compactMap { id, frame in
-                                                frame.intersects(rect) ? id : nil
-                                            })
+                                            selectedItemIDs = selectItems(intersecting: rect)
                                             selectionAnchorID = nil
                                         }
                                         .onEnded { value in
@@ -662,16 +676,14 @@ struct ShelfView: View {
                                                 clearSelection()
                                             } else {
                                                 let rect = selectionRect(from: value.startLocation, to: value.location)
-                                                selectedItemIDs = Set(itemFrames.compactMap { id, frame in
-                                                    frame.intersects(rect) ? id : nil
-                                                })
+                                                selectedItemIDs = selectItems(intersecting: rect)
                                             }
                                             selectionMarquee = nil
                                         }
                                 )
                                 .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                             LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(store.items) { item in itemCard(item) }
+                                ForEach(filteredItems) { item in itemCard(item) }
                             }
                             .padding(16)
                             if let selectionMarquee {
@@ -712,9 +724,14 @@ struct ShelfView: View {
         .onChange(of: store.items.map(\.id)) { itemIDs in
             let currentIDs = Set(itemIDs)
             let incomingIDs = currentIDs.subtracting(observedItemIDs)
+            if itemIDs.isEmpty {
+                searchText = ""
+                clearSelection()
+            }
             if !incomingIDs.isEmpty {
-                selectedItemIDs = currentIDs.count > 1 ? currentIDs : []
-                selectionAnchorID = itemIDs.last
+                let visibleIDs = Set(filteredItems.map(\.id))
+                selectedItemIDs = currentIDs.count > 1 ? visibleIDs : []
+                selectionAnchorID = filteredItems.last?.id
             } else {
                 selectedItemIDs.formIntersection(currentIDs)
                 if let selectionAnchorID, !currentIDs.contains(selectionAnchorID) {
@@ -722,6 +739,13 @@ struct ShelfView: View {
                 }
             }
             observedItemIDs = currentIDs
+        }
+        .onChange(of: searchText) { _ in
+            let visibleIDs = Set(filteredItems.map(\.id))
+            selectedItemIDs.formIntersection(visibleIDs)
+            if let selectionAnchorID, !visibleIDs.contains(selectionAnchorID) {
+                self.selectionAnchorID = nil
+            }
         }
         .onPreferenceChange(ShelfItemFramesKey.self) { itemFrames = $0 }
     }
@@ -733,10 +757,13 @@ struct ShelfView: View {
             Image(systemName: "tray.full.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Shelf").font(.headline)
-                Text(store.items.isEmpty ? "Your temporary shelf" : "\(store.items.count) item\(store.items.count == 1 ? "" : "s")")
+                Text(store.items.isEmpty ? "Your temporary shelf" : itemCountDescription)
                     .font(.caption).foregroundStyle(.secondary)
             }
             .overlay { WindowDragHandle() }
+            if !store.items.isEmpty {
+                searchField
+            }
             Spacer()
             if !store.items.isEmpty {
                 Button(action: store.clear) { Image(systemName: "trash") }
@@ -774,6 +801,44 @@ struct ShelfView: View {
         }
     }
 
+    private var itemCountDescription: String {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "\(store.items.count) item\(store.items.count == 1 ? "" : "s")"
+        }
+        return "\(filteredItems.count) of \(store.items.count) items"
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .lineLimit(1)
+                .accessibilityLabel("Search shelf")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+        .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
+        .frame(minWidth: 64, idealWidth: 112, maxWidth: 140)
+        .layoutPriority(0)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "arrow.down.doc")
@@ -787,10 +852,24 @@ struct ShelfView: View {
         .contentShape(Rectangle())
     }
 
+    private var noSearchResults: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
+            Text("No matching items")
+                .font(.system(size: 13, weight: .medium))
+            Text("Try another name or file type.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { clearSelection() }
+    }
+
     private func itemCard(_ item: ShelfItem) -> some View {
         let isSelected = selectedItemIDs.contains(item.id)
         let dragItems = isSelected
-            ? store.items.filter { selectedItemIDs.contains($0.id) && $0.fileURL != nil }
+            ? filteredItems.filter { selectedItemIDs.contains($0.id) && $0.fileURL != nil }
             : [item]
 
         let content = VStack(spacing: 7) {
@@ -870,7 +949,7 @@ struct ShelfView: View {
     }
 
     private func select(_ item: ShelfItem, modifiers: NSEvent.ModifierFlags) {
-        let visibleItems = store.items
+        let visibleItems = filteredItems
         guard let itemIndex = visibleItems.firstIndex(where: { $0.id == item.id }) else { return }
 
         if modifiers.contains(.shift),
@@ -891,6 +970,13 @@ struct ShelfView: View {
     private func clearSelection() {
         selectedItemIDs.removeAll()
         selectionAnchorID = nil
+    }
+
+    private func selectItems(intersecting rect: CGRect) -> Set<UUID> {
+        let visibleIDs = Set(filteredItems.map(\.id))
+        return Set(itemFrames.compactMap { id, frame in
+            visibleIDs.contains(id) && frame.intersects(rect) ? id : nil
+        })
     }
 
     private func selectionRect(from start: CGPoint, to current: CGPoint) -> CGRect {
