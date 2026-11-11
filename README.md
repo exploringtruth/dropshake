@@ -16,8 +16,7 @@
 3. Drag it from the shelf into Finder or another app. Select multiple items to move them together.
 
 Use the menu bar icon to open the shelf or add files, links, and text from your clipboard.
-Use **Check for Updates** to see whether a newer release is available, or **Get Latest Version** to install it.
-Version 1.2.0 is the first release with in-app updates. Install it manually once; future releases can be installed from **Get Latest Version**.
+Packaged releases check for updates automatically and show an install prompt when a new version is available. Choose **Check for Updates** in the menu bar to check immediately.
 
 ## Install
 

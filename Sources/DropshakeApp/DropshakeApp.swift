@@ -15,11 +15,11 @@ struct DropshakeApp: App {
     var body: some Scene {
         MenuBarExtra(isInserted: $isMenuBarExtraInserted) {
             Button("Open Shelf") { runtime.showShelf() }
+                .keyboardShortcut("e", modifiers: .command)
             Button("Add Clipboard Contents") { runtime.captureClipboard() }
             Button("Hide Shelf") { runtime.hideShelf() }
             Button("Clear Shelf") { runtime.shelf.clear() }
             Divider()
-            Button("Get Latest Version") { runtime.getLatestVersion() }
             Button("Check for Updates") { runtime.checkForUpdates() }
             Divider()
             Button(runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open") {
@@ -119,7 +119,7 @@ final class DropshakeRuntime: ObservableObject {
         shelfWindow.show(near: nil)
     }
     func hideShelf() { shelfWindow.hide() }
-    func getLatestVersion() {
+    func checkForUpdates() {
         guard let updaterController else {
             let alert = NSAlert()
             alert.messageText = "In-app updates are not configured in this build"
@@ -130,56 +130,6 @@ final class DropshakeRuntime: ObservableObject {
             return
         }
         updaterController.checkForUpdates(nil)
-    }
-
-    func checkForUpdates() {
-        Task { @MainActor in
-            do {
-                let url = URL(string: "https://api.github.com/repos/exploringtruth/dropshake/releases/latest")!
-                var request = URLRequest(url: url)
-                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-                request.setValue("Dropshake", forHTTPHeaderField: "User-Agent")
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let response = response as? HTTPURLResponse,
-                      (200..<300).contains(response.statusCode) else {
-                    throw UpdateCheckError.invalidResponse
-                }
-
-                let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-                let latestVersion = release.tagName.hasPrefix("v") ? String(release.tagName.dropFirst()) : release.tagName
-                let alert = NSAlert()
-                guard let installedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String else {
-                    alert.messageText = "Latest release: Dropshake \(latestVersion)"
-                    alert.informativeText = "This development build has no release version, so it can’t compare updates. Use an installed release to update in the app."
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: "OK")
-                    alert.runModal()
-                    return
-                }
-
-                switch latestVersion.compare(installedVersion, options: .numeric) {
-                case .orderedDescending:
-                    alert.messageText = "Dropshake \(latestVersion) is available"
-                    alert.informativeText = "You’re running version \(installedVersion). Choose Get Latest Version from the menu bar to install the update."
-                case .orderedSame:
-                    alert.messageText = "Dropshake is up to date"
-                    alert.informativeText = "You’re running the latest version, \(installedVersion)."
-                case .orderedAscending:
-                    alert.messageText = "This build is newer than the latest release"
-                    alert.informativeText = "You’re running version \(installedVersion). The latest published release is version \(latestVersion)."
-                }
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            } catch {
-                let alert = NSAlert()
-                alert.messageText = "Couldn’t check for updates"
-                alert.informativeText = "Check your internet connection and try again."
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-        }
     }
 
     func captureClipboard() {
@@ -243,16 +193,6 @@ final class DropshakeRuntime: ObservableObject {
             &openShelfHotKey
         )
     }
-}
-
-private struct GitHubRelease: Decodable {
-    let tagName: String
-
-    enum CodingKeys: String, CodingKey { case tagName = "tag_name" }
-}
-
-private enum UpdateCheckError: Error {
-    case invalidResponse
 }
 
 @MainActor
@@ -386,6 +326,8 @@ final class ShakeDetector {
 
     private var monitor: Any?
     private var isDragging = false
+    private var isDraggingFile = false
+    private var dragPasteboardChangeCountAtMouseDown = 0
     private var hasTriggered = false
     private var lastPoint: NSPoint?
     private var gestureStart: TimeInterval = 0
@@ -414,18 +356,37 @@ final class ShakeDetector {
         switch type {
         case .leftMouseDown:
             isDragging = true
+            isDraggingFile = false
+            dragPasteboardChangeCountAtMouseDown = NSPasteboard(name: .drag).changeCount
             resetGesture(at: timestamp, point: point)
             hasTriggered = false
         case .leftMouseUp:
             isDragging = false
+            isDraggingFile = false
             lastPoint = nil
             hasTriggered = false
         case .leftMouseDragged:
             guard isEnabled, isDragging, !hasTriggered else { return }
+            guard isDraggingFile || dragPasteboardContainsFileURL() else {
+                resetGesture(at: timestamp, point: point)
+                return
+            }
+            isDraggingFile = true
             track(point: point, timestamp: timestamp)
         default:
             break
         }
+    }
+
+    private func dragPasteboardContainsFileURL() -> Bool {
+        let pasteboard = NSPasteboard(name: .drag)
+        guard pasteboard.changeCount != dragPasteboardChangeCountAtMouseDown else { return false }
+        let fileTypes: Set<NSPasteboard.PasteboardType> = [
+            .fileURL,
+            NSPasteboard.PasteboardType("NSFilenamesPboardType"),
+            NSPasteboard.PasteboardType("com.apple.filepromise")
+        ]
+        return pasteboard.types?.contains(where: fileTypes.contains) == true
     }
 
     private func track(point: NSPoint, timestamp: TimeInterval) {
@@ -627,6 +588,7 @@ struct ShelfView: View {
     @State private var isTargeted = false
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectionAnchorID: UUID?
+    @State private var focusedItemID: UUID?
     @State private var observedItemIDs: Set<UUID> = []
     @State private var itemFrames: [UUID: CGRect] = [:]
     @State private var selectionMarquee: CGRect?
@@ -655,48 +617,63 @@ struct ShelfView: View {
             else if filteredItems.isEmpty { noSearchResults }
             else {
                 GeometryReader { geometry in
-                    ScrollView {
-                        ZStack(alignment: .topLeading) {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .gesture(
-                                    DragGesture(minimumDistance: 0, coordinateSpace: .named("shelfScroll"))
-                                        .onChanged { value in
-                                            let rect = selectionRect(from: value.startLocation, to: value.location)
-                                            selectionMarquee = rect
-                                            selectedItemIDs = selectItems(intersecting: rect)
-                                            selectionAnchorID = nil
-                                        }
-                                        .onEnded { value in
-                                            let distance = hypot(
-                                                value.location.x - value.startLocation.x,
-                                                value.location.y - value.startLocation.y
-                                            )
-                                            if distance < 4 {
-                                                clearSelection()
-                                            } else {
+                    ScrollViewReader { scrollProxy in
+                        ScrollView {
+                            ZStack(alignment: .topLeading) {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .gesture(
+                                        DragGesture(minimumDistance: 0, coordinateSpace: .named("shelfScroll"))
+                                            .onChanged { value in
                                                 let rect = selectionRect(from: value.startLocation, to: value.location)
+                                                selectionMarquee = rect
                                                 selectedItemIDs = selectItems(intersecting: rect)
+                                                selectionAnchorID = nil
                                             }
-                                            selectionMarquee = nil
-                                        }
-                                )
-                                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(filteredItems) { item in itemCard(item) }
+                                            .onEnded { value in
+                                                let distance = hypot(
+                                                    value.location.x - value.startLocation.x,
+                                                    value.location.y - value.startLocation.y
+                                                )
+                                                if distance < 4 {
+                                                    clearSelection()
+                                                } else {
+                                                    let rect = selectionRect(from: value.startLocation, to: value.location)
+                                                    selectedItemIDs = selectItems(intersecting: rect)
+                                                    focusedItemID = filteredItems.last(where: { selectedItemIDs.contains($0.id) })?.id
+                                                    selectionAnchorID = focusedItemID
+                                                }
+                                                selectionMarquee = nil
+                                            }
+                                    )
+                                    .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                                LazyVGrid(columns: columns, spacing: 12) {
+                                    ForEach(filteredItems) { item in
+                                        itemCard(item).id(item.id)
+                                    }
+                                }
+                                .padding(16)
+                                if let selectionMarquee {
+                                    Rectangle()
+                                        .fill(Color.accentColor.opacity(0.18))
+                                        .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1))
+                                        .frame(width: selectionMarquee.width, height: selectionMarquee.height)
+                                        .offset(x: selectionMarquee.minX, y: selectionMarquee.minY)
+                                        .allowsHitTesting(false)
+                                }
                             }
-                            .padding(16)
-                            if let selectionMarquee {
-                                Rectangle()
-                                    .fill(Color.accentColor.opacity(0.18))
-                                    .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1))
-                                    .frame(width: selectionMarquee.width, height: selectionMarquee.height)
-                                    .offset(x: selectionMarquee.minX, y: selectionMarquee.minY)
-                                    .allowsHitTesting(false)
+                        }
+                        .coordinateSpace(name: "shelfScroll")
+                        .background {
+                            ShelfKeyboardMonitor { event in
+                                handleShelfArrowKey(event) { id in
+                                    withAnimation(.easeInOut(duration: 0.12)) {
+                                        scrollProxy.scrollTo(id, anchor: .center)
+                                    }
+                                }
                             }
                         }
                     }
-                    .coordinateSpace(name: "shelfScroll")
                 }
             }
             footer
@@ -719,6 +696,7 @@ struct ShelfView: View {
             if itemIDs.count > 1 {
                 selectedItemIDs = Set(itemIDs)
                 selectionAnchorID = itemIDs.last
+                focusedItemID = itemIDs.last
             }
         }
         .onChange(of: store.items.map(\.id)) { itemIDs in
@@ -732,10 +710,14 @@ struct ShelfView: View {
                 let visibleIDs = Set(filteredItems.map(\.id))
                 selectedItemIDs = currentIDs.count > 1 ? visibleIDs : []
                 selectionAnchorID = filteredItems.last?.id
+                focusedItemID = filteredItems.last?.id
             } else {
                 selectedItemIDs.formIntersection(currentIDs)
                 if let selectionAnchorID, !currentIDs.contains(selectionAnchorID) {
                     self.selectionAnchorID = itemIDs.last
+                }
+                if let focusedItemID, !currentIDs.contains(focusedItemID) {
+                    self.focusedItemID = itemIDs.last
                 }
             }
             observedItemIDs = currentIDs
@@ -745,6 +727,9 @@ struct ShelfView: View {
             selectedItemIDs.formIntersection(visibleIDs)
             if let selectionAnchorID, !visibleIDs.contains(selectionAnchorID) {
                 self.selectionAnchorID = nil
+            }
+            if let focusedItemID, !visibleIDs.contains(focusedItemID) {
+                self.focusedItemID = nil
             }
         }
         .onPreferenceChange(ShelfItemFramesKey.self) { itemFrames = $0 }
@@ -949,27 +934,108 @@ struct ShelfView: View {
     }
 
     private func select(_ item: ShelfItem, modifiers: NSEvent.ModifierFlags) {
-        let visibleItems = filteredItems
-        guard let itemIndex = visibleItems.firstIndex(where: { $0.id == item.id }) else { return }
+        guard filteredItems.contains(where: { $0.id == item.id }) else { return }
 
-        if modifiers.contains(.shift),
-           let anchorID = selectionAnchorID,
-           let anchorIndex = visibleItems.firstIndex(where: { $0.id == anchorID }) {
-            let range = min(anchorIndex, itemIndex)...max(anchorIndex, itemIndex)
-            selectedItemIDs = Set(range.map { visibleItems[$0].id })
-        } else if modifiers.contains(.command) {
+        if modifiers.contains(.shift) || modifiers.contains(.command) {
             if selectedItemIDs.contains(item.id) { selectedItemIDs.remove(item.id) }
             else { selectedItemIDs.insert(item.id) }
-            selectionAnchorID = item.id
+            if selectionAnchorID == nil || selectionAnchorID == item.id {
+                selectionAnchorID = filteredItems.last(where: { selectedItemIDs.contains($0.id) })?.id
+            }
         } else {
             selectedItemIDs = [item.id]
             selectionAnchorID = item.id
         }
+        focusedItemID = item.id
     }
 
     private func clearSelection() {
         selectedItemIDs.removeAll()
         selectionAnchorID = nil
+        focusedItemID = nil
+    }
+
+    private func handleShelfArrowKey(_ event: NSEvent, scrollTo: (UUID) -> Void) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) else {
+            return false
+        }
+
+        // Let the search field and any other text editor keep their normal arrow-key behavior.
+        if NSApp.keyWindow?.firstResponder is NSTextView || NSApp.keyWindow?.firstResponder is NSTextField {
+            return false
+        }
+
+        let direction: ShelfArrowDirection
+        switch event.keyCode {
+        case 123: direction = .left
+        case 124: direction = .right
+        case 125: direction = .down
+        case 126: direction = .up
+        default: return false
+        }
+
+        let visibleItems = filteredItems
+        guard !visibleItems.isEmpty else { return false }
+
+        let currentID = focusedItemID ?? selectionAnchorID
+            ?? visibleItems.last(where: { selectedItemIDs.contains($0.id) })?.id
+        let currentIndex = currentID.flatMap { id in visibleItems.firstIndex(where: { $0.id == id }) } ?? 0
+        let targetID = currentID.flatMap { directionalNeighbor(from: $0, direction: direction, in: visibleItems) }
+        let fallbackColumnCount = max(1, Int(((NSApp.keyWindow?.frame.width ?? 380) - 20) / 104))
+        let step: Int
+        switch direction {
+        case .left: step = -1
+        case .right: step = 1
+        case .up: step = -fallbackColumnCount
+        case .down: step = fallbackColumnCount
+        }
+        let targetIndex = targetID.flatMap { id in visibleItems.firstIndex(where: { $0.id == id }) }
+            ?? min(max(currentIndex + step, 0), visibleItems.count - 1)
+        let target = visibleItems[targetIndex]
+
+        if modifiers.contains(.shift) {
+            let anchorID = selectionAnchorID ?? currentID ?? target.id
+            selectionAnchorID = anchorID
+            if let anchorIndex = visibleItems.firstIndex(where: { $0.id == anchorID }) {
+                let range = min(anchorIndex, targetIndex)...max(anchorIndex, targetIndex)
+                selectedItemIDs = Set(range.map { visibleItems[$0].id })
+            } else {
+                selectedItemIDs.insert(target.id)
+            }
+        } else {
+            selectedItemIDs = [target.id]
+            selectionAnchorID = target.id
+        }
+        focusedItemID = target.id
+        scrollTo(target.id)
+        return true
+    }
+
+    private func directionalNeighbor(
+        from id: UUID,
+        direction: ShelfArrowDirection,
+        in items: [ShelfItem]
+    ) -> UUID? {
+        guard let origin = itemFrames[id] else { return nil }
+        let originCenter = CGPoint(x: origin.midX, y: origin.midY)
+        let candidates = items.compactMap { item -> (UUID, CGFloat)? in
+            guard item.id != id, let frame = itemFrames[item.id] else { return nil }
+            let center = CGPoint(x: frame.midX, y: frame.midY)
+            let dx = center.x - originCenter.x
+            let dy = center.y - originCenter.y
+            let primary: CGFloat
+            let secondary: CGFloat
+            switch direction {
+            case .left: primary = -dx; secondary = abs(dy)
+            case .right: primary = dx; secondary = abs(dy)
+            case .up: primary = -dy; secondary = abs(dx)
+            case .down: primary = dy; secondary = abs(dx)
+            }
+            guard primary > 1 else { return nil }
+            return (item.id, primary + secondary * 2.5)
+        }
+        return candidates.min(by: { $0.1 < $1.1 })?.0
     }
 
     private func selectItems(intersecting rect: CGRect) -> Set<UUID> {
@@ -1004,6 +1070,51 @@ struct ShelfView: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
+}
+
+private enum ShelfArrowDirection {
+    case left
+    case right
+    case up
+    case down
+}
+
+private struct ShelfKeyboardMonitor: NSViewRepresentable {
+    let onKeyDown: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> ShelfKeyboardMonitorView {
+        let view = ShelfKeyboardMonitorView()
+        view.onKeyDown = onKeyDown
+        return view
+    }
+
+    func updateNSView(_ view: ShelfKeyboardMonitorView, context: Context) {
+        view.onKeyDown = onKeyDown
+    }
+}
+
+private final class ShelfKeyboardMonitorView: NSView {
+    var onKeyDown: ((NSEvent) -> Bool)?
+    private var eventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+        guard window != nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.window, event.window === window else { return event }
+            return self.onKeyDown?(event) == true ? nil : event
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    deinit {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+    }
 }
 
 private struct ShelfItemFramesKey: PreferenceKey {
