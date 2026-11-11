@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/Dropshake-icon-1024.png" width="128" alt="Dropshake app icon">
+  <img src="Resources/Dropshake-icon-rounded.png" width="128" alt="Dropshake app icon">
   <h1 align="center">Dropshake</h1>
   <p align="center">A temporary shelf for files you want to move later.</p>
   <p align="center">
@@ -50,4 +50,8 @@ To build the installer DMG:
 bash ./scripts/build-dmg.sh
 ```
 
-Dropshake is an independent project inspired by the file-shelf workflow. See [LICENSE](LICENSE).
+Dropshake is an independent project inspired by the file-shelf workflow.
+
+## License
+
+Dropshake is licensed under the GNU General Public License v3.0 or later ([GPL-3.0-or-later](LICENSE)).
