@@ -3,6 +3,12 @@ name: Build and publish DMG
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Tag to build and publish (for example, v1.2.3)
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -10,8 +16,18 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Validate release tag
+        run: |
+          if [[ "$RELEASE_TAG" != v* ]]; then
+            echo "Release tag must start with v (for example, v1.2.3)." >&2
+            exit 1
+          fi
       - name: Build app and DMG
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
@@ -20,7 +36,7 @@ jobs:
             echo "Set the SPARKLE_PUBLIC_ED_KEY repository variable before publishing an updater-enabled release." >&2
             exit 1
           fi
-          VERSION="${GITHUB_REF_NAME#v}" bash ./scripts/build-dmg.sh
+          VERSION="${RELEASE_TAG#v}" bash ./scripts/build-dmg.sh
       - name: Prepare signed Sparkle update feed
         env:
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
@@ -29,7 +45,7 @@ jobs:
             echo "Set the SPARKLE_PRIVATE_ED_KEY repository secret before publishing an updater-enabled release." >&2
             exit 1
           fi
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           UPDATE_DIR="$RUNNER_TEMP/dropshake-updates"
           mkdir -p "$UPDATE_DIR"
           ditto -c -k --sequesterRsrc --keepParent ".build/Dropshake.app" "$UPDATE_DIR/Dropshake-$VERSION.zip"
@@ -41,7 +57,7 @@ jobs:
           SPARKLE_TOOLS="${SPARKLE_GENERATE_APPCAST%/generate_appcast}"
           printf '%s' "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_TOOLS/generate_appcast" \
             --ed-key-file - \
-            --download-url-prefix "https://github.com/exploringtruth/dropshake/releases/download/$GITHUB_REF_NAME/" \
+            --download-url-prefix "https://github.com/exploringtruth/dropshake/releases/download/$RELEASE_TAG/" \
             "$UPDATE_DIR"
           if ! grep -q 'sparkle:edSignature=' "$UPDATE_DIR/appcast.xml"; then
             echo "Generated appcast has no EdDSA archive signature; check the Sparkle public/private key pairing." >&2
@@ -50,20 +66,20 @@ jobs:
           cp "$UPDATE_DIR/appcast.xml" appcast.xml
           cp "$UPDATE_DIR/Dropshake-$VERSION.zip" .
       - name: Create stable download name
-        run: cp "Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg
+        run: cp "Dropshake-${RELEASE_TAG#v}.dmg" Dropshake.dmg
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RELEASE_NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
+          RELEASE_NOTES=".github/release-notes/$RELEASE_TAG.md"
           if [[ -f "$RELEASE_NOTES" ]]; then
-            RELEASE_ARGS=(--notes-file "$RELEASE_NOTES" --title "Dropshake $GITHUB_REF_NAME")
+            RELEASE_ARGS=(--notes-file "$RELEASE_NOTES" --title "Dropshake $RELEASE_TAG")
           else
-            RELEASE_ARGS=(--generate-notes --title "Dropshake $GITHUB_REF_NAME")
+            RELEASE_ARGS=(--generate-notes --title "Dropshake $RELEASE_TAG")
           fi
-          ASSETS=("Dropshake-${GITHUB_REF_NAME#v}.dmg" Dropshake.dmg "Dropshake-${GITHUB_REF_NAME#v}.zip" appcast.xml)
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          ASSETS=("Dropshake-${RELEASE_TAG#v}.dmg" Dropshake.dmg "Dropshake-${RELEASE_TAG#v}.zip" appcast.xml)
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" "${RELEASE_ARGS[@]}"
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" "${RELEASE_ARGS[@]}"
           fi
