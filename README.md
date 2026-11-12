@@ -15,13 +15,18 @@
   </p>
 </p>
 
-## Use Dropshake
+## About
+
+Dropshake is a temporary file shelf for macOS. Shake while dragging to set files aside, then move them into Finder or another app when you’re ready. Files stay in their original locations until you drag them out of the shelf.
+
+## Usage
 
 1. Drag a file from Finder and shake your pointer to open a fresh shelf.
-2. Drop the file onto the shelf while you switch to its destination.
-3. Drag it from the shelf into Finder or another app. Select multiple items to move them together.
+2. Drop the file onto the shelf. Keep adding files as you gather what you need.
+3. Drag a file from the shelf into its destination. Shift-click to select a range, or drag across empty shelf space to select several items.
 
-Use the menu bar icon to open the shelf or add files, links, and text from your clipboard.
+Press **⌘E** or choose **Open Shelf** from the menu bar to open an empty shelf manually. Use **Add Clipboard Contents** to place clipboard items on the shelf. Search by file name or extension from the shelf’s search field.
+
 Packaged releases check for updates automatically and show an install prompt when a new version is available. Choose **Check for Updates** in the menu bar to check immediately.
 
 ## Install
