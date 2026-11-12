@@ -13,6 +13,7 @@ let package = Package(
             name: "DropshakeApp",
             dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/DropshakeApp",
+            resources: [.process("Resources")],
             linkerSettings: [
                 // SwiftPM places linked binary frameworks beside `swift run`'s
                 // executable. The packaged app also embeds Sparkle in

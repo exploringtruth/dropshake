@@ -655,8 +655,11 @@ struct ShelfView: View {
                                 .padding(16)
                                 if let selectionMarquee {
                                     Rectangle()
-                                        .fill(Color.accentColor.opacity(0.18))
-                                        .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1))
+                                        .fill(DropshakeBrand.selectionColor.opacity(0.07))
+                                        .overlay {
+                                            Rectangle()
+                                                .strokeBorder(DropshakeBrand.selectionColor.opacity(0.55), lineWidth: 1)
+                                        }
                                         .frame(width: selectionMarquee.width, height: selectionMarquee.height)
                                         .offset(x: selectionMarquee.minX, y: selectionMarquee.minY)
                                         .allowsHitTesting(false)
@@ -678,7 +681,23 @@ struct ShelfView: View {
             }
             footer
         }
-        .background(isTargeted ? Color.accentColor.opacity(0.12) : Color(nsColor: .windowBackgroundColor).opacity(0.94))
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.149, green: 0.165, blue: 0.231).opacity(0.94),
+                            Color(red: 0.082, green: 0.102, blue: 0.165).opacity(0.92)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            if isTargeted {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(DropshakeBrand.selectionColor.opacity(0.07))
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.18)))
         .background(ShelfDropTarget(
@@ -737,27 +756,40 @@ struct ShelfView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "line.3.horizontal").font(.system(size: 11, weight: .medium)).foregroundStyle(.tertiary)
-                .help("Drag anywhere across the header to move shelf")
-            Image(systemName: "tray.full.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Shelf").font(.headline)
-                Text(store.items.isEmpty ? "Your temporary shelf" : itemCountDescription)
-                    .font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 3.5) {
+                ForEach(0..<3) { _ in
+                    Capsule().frame(width: 16, height: 1.5)
+                }
             }
+            .foregroundStyle(.tertiary)
+            .frame(width: 20, height: 24)
+            .help("Drag anywhere across the header to move shelf")
+            Image(nsImage: DropshakeBrand.appIcon)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Shelf").font(.system(size: 15, weight: .semibold))
+                Text(store.items.isEmpty ? "Your temporary shelf" : itemCountDescription)
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .fixedSize(horizontal: true, vertical: false)
             .overlay { WindowDragHandle() }
             if !store.items.isEmpty {
                 searchField
+            } else {
+                Spacer()
             }
-            Spacer()
             if !store.items.isEmpty {
-                Button(action: store.clear) { Image(systemName: "trash") }
-                    .buttonStyle(.plain).help("Clear shelf")
+                Button(action: removeSelectedItemsOrClearShelf) { Image(systemName: "trash") }
+                    .buttonStyle(.plain)
+                    .help(selectedItemIDs.isEmpty ? "Clear shelf" : "Remove selected items")
             }
             Button(action: onClose) { Image(systemName: "xmark") }
                 .buttonStyle(.plain).focusable(false).help("Hide shelf")
         }
-        .padding(.horizontal, 30).padding(.vertical, 14)
+        .padding(.leading, 20).padding(.trailing, 20).padding(.vertical, 14)
         .background {
             GeometryReader { proxy in
                 // Keep the drag target clear of AppKit's native resize border.
@@ -820,8 +852,8 @@ struct ShelfView: View {
         .frame(height: 26)
         .background(Capsule().fill(Color.white.opacity(0.08)))
         .overlay(Capsule().strokeBorder(.white.opacity(0.14)))
-        .frame(minWidth: 64, idealWidth: 112, maxWidth: 140)
-        .layoutPriority(0)
+        .frame(minWidth: 64, idealWidth: 112, maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var emptyState: some View {
@@ -868,13 +900,23 @@ struct ShelfView: View {
             Text(item.kind).font(.system(size: 9, weight: .medium)).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 10).padding(.horizontal, 6)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: 12)
-                .fill(isSelected ? Color.accentColor.opacity(0.24) : Color.white.opacity(0.07))
-        )
+                .fill(Color.white.opacity(0.07))
+            if isSelected {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(DropshakeBrand.selectionColor.opacity(0.07))
+            }
+        }
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+                .strokeBorder(Color.white.opacity(isSelected ? 0 : 0.16), lineWidth: 1)
+                .overlay {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(DropshakeBrand.selectionColor.opacity(0.78), lineWidth: 1.25)
+                    }
+                }
                 .allowsHitTesting(false)
         }
 
@@ -936,10 +978,31 @@ struct ShelfView: View {
     private func select(_ item: ShelfItem, modifiers: NSEvent.ModifierFlags) {
         guard filteredItems.contains(where: { $0.id == item.id }) else { return }
 
-        if modifiers.contains(.shift) || modifiers.contains(.command) {
+        if modifiers.contains(.shift) {
+            if selectedItemIDs.contains(item.id) {
+                // Shift-clicking an already selected item removes just that item,
+                // which makes it easy to trim an automatic or marquee selection.
+                selectedItemIDs.remove(item.id)
+                if selectionAnchorID == item.id {
+                    selectionAnchorID = filteredItems.last(where: { selectedItemIDs.contains($0.id) })?.id
+                }
+            } else {
+                let anchorID = selectionAnchorID ?? item.id
+                if let anchorIndex = filteredItems.firstIndex(where: { $0.id == anchorID }),
+                   let itemIndex = filteredItems.firstIndex(where: { $0.id == item.id }) {
+                    let range = min(anchorIndex, itemIndex)...max(anchorIndex, itemIndex)
+                    selectedItemIDs.formUnion(range.map { filteredItems[$0].id })
+                } else {
+                    selectedItemIDs.insert(item.id)
+                }
+                selectionAnchorID = anchorID
+            }
+        } else if modifiers.contains(.command) {
             if selectedItemIDs.contains(item.id) { selectedItemIDs.remove(item.id) }
             else { selectedItemIDs.insert(item.id) }
-            if selectionAnchorID == nil || selectionAnchorID == item.id {
+            if selectedItemIDs.contains(item.id) {
+                selectionAnchorID = item.id
+            } else if selectionAnchorID == item.id {
                 selectionAnchorID = filteredItems.last(where: { selectedItemIDs.contains($0.id) })?.id
             }
         } else {
@@ -953,6 +1016,16 @@ struct ShelfView: View {
         selectedItemIDs.removeAll()
         selectionAnchorID = nil
         focusedItemID = nil
+    }
+
+    private func removeSelectedItemsOrClearShelf() {
+        let existingIDs = Set(store.items.map(\.id))
+        let selectedExistingIDs = selectedItemIDs.intersection(existingIDs)
+        if selectedExistingIDs.isEmpty {
+            store.clear()
+        } else {
+            store.removeItems(withIDs: selectedExistingIDs)
+        }
     }
 
     private func handleShelfArrowKey(_ event: NSEvent, scrollTo: (UUID) -> Void) -> Bool {
@@ -1063,13 +1136,29 @@ struct ShelfView: View {
         HStack {
             Label("Files stay in their original locations", systemImage: "lock.fill")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text("Shake while dragging to open")
                 .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
 
+}
+
+private enum DropshakeBrand {
+    static let appIcon: NSImage = {
+        guard let url = Bundle.module.url(forResource: "Dropshake-icon-rounded", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 22, height: 22))
+        }
+        return image
+    }()
+
+    static let selectionColor = Color(red: 0.67, green: 0.38, blue: 0.93)
 }
 
 private enum ShelfArrowDirection {
