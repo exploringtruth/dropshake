@@ -3,9 +3,15 @@
   <h1 align="center">Dropshake</h1>
   <p align="center">A temporary shelf for files you want to move later.</p>
   <p align="center">
-    <a href="https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake.dmg">
-      <img src="https://img.shields.io/badge/Download_for_macOS-Dropshake-6f4bff?logo=apple&logoColor=white" alt="Download Dropshake for macOS">
-    </a>
+    <a href="https://github.com/exploringtruth/dropshake/releases/latest"><img src="https://img.shields.io/github/v/release/exploringtruth/dropshake?label=release" alt="Latest release"></a>
+    <a href="https://github.com/exploringtruth/dropshake/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/exploringtruth/dropshake/release.yml?label=build" alt="Build status"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/exploringtruth/dropshake?label=license" alt="GPL-3.0-or-later license"></a>
+    <img src="https://img.shields.io/badge/macOS-13%2B-blue" alt="Requires macOS 13 or later">
+  </p>
+  <p align="center">
+    <a href="https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake.dmg"><strong>Download the DMG</strong></a>
+    &nbsp;·&nbsp;
+    <a href="https://exploringtruth.github.io/dropshake/"><strong>Official website</strong></a>
   </p>
 </p>
 
