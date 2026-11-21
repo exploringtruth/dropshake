@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -6,12 +6,16 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.executable(name: "Dropshake", targets: ["DropshakeApp"])],
     dependencies: [
-        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6")
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.1.0")
     ],
     targets: [
         .executableTarget(
             name: "DropshakeApp",
-            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")
+            ],
             path: "Sources/DropshakeApp",
             resources: [.process("Resources")],
             linkerSettings: [
@@ -24,5 +28,6 @@ let package = Package(
                 ])
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

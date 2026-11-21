@@ -45,6 +45,8 @@ You only need to approve the installed copy. macOS may ask again after you insta
 
 Resetting items when opening the shelf is enabled by default. Choose **Disable Reset Items** in the menu bar to keep existing shelf items when you shake or press ⌘E; choose **Enable Reset Items** to restore the default behavior.
 
+Choose **Shortcuts…** in the menu bar to assign global keyboard shortcuts to any menu command. The window groups the commands under **Shelf** and **App**. **⌘E** opens the shelf by default.
+
 Inside the shelf:
 
 - Press **⌘E** or choose **Open Shelf** from the menu bar to open the shelf manually; the **Reset Items** setting controls whether existing items are cleared.
@@ -83,7 +85,7 @@ Dropshake is not notarized by Apple yet. Follow the **If macOS blocks Dropshake*
 
 ### How do I open the shelf without shaking a file?
 
-Press **⌘E** or choose **Open Shelf** from the menu bar. This opens a fresh, empty shelf.
+Press **⌘E** (the default) or choose **Open Shelf** from the menu bar. The **Reset Items** setting controls whether opening the shelf clears its items.
 
 ## Build from source
 

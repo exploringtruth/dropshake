@@ -1,6 +1,6 @@
 import AppKit
-import Carbon
 import Foundation
+import KeyboardShortcuts
 import QuickLookThumbnailing
 import QuickLookUI
 import Sparkle
@@ -9,33 +9,51 @@ import UniformTypeIdentifiers
 
 @main
 struct DropshakeApp: App {
-    @StateObject private var runtime = DropshakeRuntime()
+    @NSApplicationDelegateAdaptor(DropshakeAppDelegate.self) private var appDelegate
+    @StateObject private var runtime = DropshakeRuntime.shared
     @State private var isMenuBarExtraInserted = true
 
     var body: some Scene {
         MenuBarExtra(isInserted: $isMenuBarExtraInserted) {
-            Button("Open Shelf") { runtime.showShelf() }
-                .keyboardShortcut("e", modifiers: .command)
-            Button("Add Clipboard Contents") { runtime.captureClipboard() }
-            Button("Hide Shelf") { runtime.hideShelf() }
-            Button("Clear Shelf") { runtime.shelf.clear() }
-            Divider()
-            Button("Check for Updates") { runtime.checkForUpdates() }
-            Divider()
-            Button(runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open") {
-                runtime.toggleShake()
-            }
-            Button(runtime.resetItemsOnOpen ? "Disable Reset Items" : "Enable Reset Items") {
-                runtime.toggleResetItemsOnOpen()
-            }
-            Divider()
-            Button("Quit Dropshake") { NSApp.terminate(nil) }
+            MenuBarContent(runtime: runtime)
         } label: {
             Image(nsImage: DropshakeMenuBarIcon.image)
                 .renderingMode(.template)
                 .frame(width: 18, height: 18)
+                .accessibilityLabel("Dropshake")
         }
         .menuBarExtraStyle(.menu)
+    }
+}
+
+private final class DropshakeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
+private struct MenuBarContent: View {
+    @ObservedObject var runtime: DropshakeRuntime
+
+    var body: some View {
+        ForEach(ShortcutAction.allCases) { action in
+            if action.startsMenuSection {
+                Divider()
+            }
+            Button(menuTitle(for: action)) { runtime.perform(action) }
+                .globalKeyboardShortcut(action.shortcutName)
+        }
+    }
+
+    private func menuTitle(for action: ShortcutAction) -> String {
+        switch action {
+        case .toggleShake:
+            runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open"
+        case .toggleResetItems:
+            runtime.resetItemsOnOpen ? "Disable Reset Items" : "Enable Reset Items"
+        default:
+            action.title
+        }
     }
 }
 
@@ -84,17 +102,17 @@ private enum DropshakeMenuBarIcon {
 
 @MainActor
 final class DropshakeRuntime: ObservableObject {
+    static let shared = DropshakeRuntime()
+
     let shelf = ShelfStore()
     private let shelfWindow: ShelfWindowController
     private let shakeDetector: ShakeDetector
     private let updaterController: SPUStandardUpdaterController?
     @Published private(set) var shakeEnabled: Bool
     @Published private(set) var resetItemsOnOpen: Bool
-    private var openShelfHotKey: EventHotKeyRef?
-    private var openShelfEventHandler: EventHandlerRef?
 
     private let shakeEnabledKey = "dropshake.shakeEnabled"
-    private let resetItemsPreferenceKey = "dropshake.resetItemsOnShake"
+    private let resetItemsOnShakeKey = "dropshake.resetItemsOnShake"
 
     init() {
         let shelfWindow = ShelfWindowController(store: shelf)
@@ -109,14 +127,38 @@ final class DropshakeRuntime: ObservableObject {
         self.shakeDetector = shakeDetector
         self.updaterController = updaterController
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
-        self.resetItemsOnOpen = UserDefaults.standard.object(forKey: resetItemsPreferenceKey) as? Bool ?? true
-        registerOpenShelfHotKey()
+        self.resetItemsOnOpen = UserDefaults.standard.object(forKey: resetItemsOnShakeKey) as? Bool ?? true
+        restoreOpenShelfDefaultIfNeeded()
+        for action in ShortcutAction.allCases {
+            KeyboardShortcuts.onKeyDown(for: action.shortcutName) { [weak self] in
+                Task { @MainActor in self?.perform(action) }
+            }
+        }
 
         shakeDetector.onShake = { [weak self] in
             self?.showShelf(near: NSEvent.mouseLocation, resetToDefaultSize: true)
         }
         shakeDetector.isEnabled = shakeEnabled
         shakeDetector.start()
+    }
+
+    func perform(_ action: ShortcutAction) {
+        switch action {
+        case .openShelf: showShelf()
+        case .addClipboard: captureClipboard()
+        case .hideShelf: hideShelf()
+        case .clearShelf: shelf.clear()
+        case .checkForUpdates: checkForUpdates()
+        case .sendFeedback: sendFeedback()
+        case .toggleShake: toggleShake()
+        case .toggleResetItems: toggleResetItemsOnOpen()
+        case .showShortcuts:
+            // Let the menu stop tracking before taking keyboard focus.
+            DispatchQueue.main.async {
+                ShortcutsWindowPresentation.shared.bringForward()
+            }
+        case .quit: NSApp.terminate(nil)
+        }
     }
 
     func showShelf() {
@@ -127,7 +169,14 @@ final class DropshakeRuntime: ObservableObject {
         if resetItemsOnOpen { shelf.clear() }
         shelfWindow.show(near: point, resetToDefaultSize: resetToDefaultSize)
     }
+
     func hideShelf() { shelfWindow.hide() }
+
+    func sendFeedback() {
+        guard let url = URL(string: "https://github.com/exploringtruth/dropshake/issues") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     func checkForUpdates() {
         guard let updaterController else {
             let alert = NSAlert()
@@ -164,48 +213,142 @@ final class DropshakeRuntime: ObservableObject {
 
     func toggleResetItemsOnOpen() {
         resetItemsOnOpen.toggle()
-        UserDefaults.standard.set(resetItemsOnOpen, forKey: resetItemsPreferenceKey)
+        UserDefaults.standard.set(resetItemsOnOpen, forKey: resetItemsOnShakeKey)
     }
 
-    private func registerOpenShelfHotKey() {
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let callback: EventHandlerProcPtr = { _, event, userData in
-            guard let event, let userData else { return noErr }
-            var pressedHotKey = EventHotKeyID()
-            let status = GetEventParameter(
-                event,
-                EventParamName(kEventParamDirectObject),
-                EventParamType(typeEventHotKeyID),
-                nil,
-                MemoryLayout<EventHotKeyID>.size,
-                nil,
-                &pressedHotKey
-            )
-            guard status == noErr, pressedHotKey.id == 1 else { return noErr }
-            let runtime = Unmanaged<DropshakeRuntime>.fromOpaque(userData).takeUnretainedValue()
-            Task { @MainActor in runtime.showShelf() }
-            return noErr
+}
+
+extension KeyboardShortcuts.Name {
+    static let dropshakeOpenShelf = Self(
+        "dropshake.openShelf",
+        initial: .init(.e, modifiers: [.command])
+    )
+    static let dropshakeAddClipboard = Self("dropshake.addClipboard")
+    static let dropshakeHideShelf = Self("dropshake.hideShelf")
+    static let dropshakeClearShelf = Self("dropshake.clearShelf")
+    static let dropshakeCheckForUpdates = Self("dropshakeCheckForUpdates")
+    static let dropshakeSendFeedback = Self("dropshakeSendFeedback")
+    static let dropshakeToggleShake = Self("dropshakeToggleShake")
+    static let dropshakeToggleResetItems = Self("dropshakeToggleResetItems")
+    static let dropshakeShowShortcuts = Self("dropshakeShowShortcuts")
+    static let dropshakeQuit = Self("dropshakeQuit")
+}
+
+enum ShortcutAction: String, CaseIterable, Identifiable {
+    case openShelf
+    case addClipboard
+    case hideShelf
+    case clearShelf
+    case checkForUpdates
+    case sendFeedback
+    case toggleShake
+    case toggleResetItems
+    case showShortcuts
+    case quit
+
+    static let shelfActions: [Self] = [.openShelf, .addClipboard, .hideShelf, .clearShelf]
+    static let appActions: [Self] = [.checkForUpdates, .sendFeedback, .toggleShake, .toggleResetItems, .showShortcuts, .quit]
+    static var allCases: [Self] { shelfActions + appActions }
+
+    var startsMenuSection: Bool {
+        self == .checkForUpdates || self == .toggleShake || self == .showShortcuts
+    }
+
+    var id: String { rawValue }
+    var shortcutName: KeyboardShortcuts.Name {
+        switch self {
+        case .openShelf: .dropshakeOpenShelf
+        case .addClipboard: .dropshakeAddClipboard
+        case .hideShelf: .dropshakeHideShelf
+        case .clearShelf: .dropshakeClearShelf
+        case .checkForUpdates: .dropshakeCheckForUpdates
+        case .sendFeedback: .dropshakeSendFeedback
+        case .toggleShake: .dropshakeToggleShake
+        case .toggleResetItems: .dropshakeToggleResetItems
+        case .showShortcuts: .dropshakeShowShortcuts
+        case .quit: .dropshakeQuit
         }
+    }
+    var title: String {
+        switch self {
+        case .openShelf: "Open Shelf"
+        case .addClipboard: "Add Clipboard Contents"
+        case .hideShelf: "Hide Shelf"
+        case .clearShelf: "Clear Shelf"
+        case .checkForUpdates: "Check for Updates"
+        case .sendFeedback: "Send Feedback…"
+        case .toggleShake: "Toggle Shake to Open"
+        case .toggleResetItems: "Toggle Reset Items"
+        case .showShortcuts: "Shortcuts…"
+        case .quit: "Quit Dropshake"
+        }
+    }
+    var detail: String? {
+        switch self {
+        case .openShelf: "Show the shelf anywhere on your Mac."
+        case .addClipboard: "Add the current clipboard contents to the shelf."
+        case .hideShelf: "Hide the shelf window."
+        case .clearShelf: "Remove every item from the shelf."
+        default: nil
+        }
+    }
+}
 
-        let handlerStatus = InstallEventHandler(
-            GetApplicationEventTarget(),
-            callback,
-            1,
-            &eventType,
-            UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
-            &openShelfEventHandler
-        )
-        guard handlerStatus == noErr else { return }
+@MainActor
+private func restoreOpenShelfDefaultIfNeeded() {
+    let defaults = UserDefaults.standard
+    let migrationKey = "dropshake.didRestoreOpenShelfDefault"
+    guard !defaults.bool(forKey: migrationKey) else { return }
 
-        let hotKeyID = EventHotKeyID(signature: OSType(0x4453686B), id: 1)
-        RegisterEventHotKey(
-            UInt32(kVK_ANSI_E),
-            UInt32(cmdKey),
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &openShelfHotKey
-        )
+    let openShelf = KeyboardShortcuts.Name.dropshakeOpenShelf
+    // Earlier test builds could leave the default explicitly disabled.
+    // Apply this repair once so future removals and custom bindings persist.
+    if openShelf.shortcut == nil,
+       !ShortcutAction.allCases.contains(where: {
+           $0 != .openShelf && $0.shortcutName.shortcut == openShelf.initialShortcut
+       }) {
+        KeyboardShortcuts.reset(openShelf)
+    }
+    defaults.set(true, forKey: migrationKey)
+}
+
+struct ShortcutPreferencesView: View {
+    var body: some View {
+        Form {
+            Section("Shelf") {
+                shortcutRows(ShortcutAction.shelfActions)
+            }
+            Section {
+                shortcutRows(ShortcutAction.appActions)
+            } header: {
+                Text("App")
+            } footer: {
+                Text("Use ⌘, ⌥, or ⌃ with a key. Function keys work on their own. Press Escape to cancel.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 560, height: 590)
+    }
+
+    private func shortcutRows(_ actions: [ShortcutAction]) -> some View {
+        ForEach(actions) { action in
+            LabeledContent {
+                KeyboardShortcuts.Recorder(for: action.shortcutName)
+                    .shortcutValidation { shortcut in
+                        if let conflict = ShortcutAction.allCases.first(where: {
+                            $0 != action && $0.shortcutName.shortcut == shortcut
+                        }) {
+                            return .disallow(reason: "Already assigned to \(conflict.title). Choose a different shortcut.")
+                        }
+                        return .allow
+                    }
+            } label: {
+                Text(action.title)
+                if let detail = action.detail { Text(detail) }
+            }
+        }
     }
 }
 

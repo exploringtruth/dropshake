@@ -32,12 +32,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILD_DIR/$APP_NAME-universal" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
-RESOURCE_BUNDLE="$(find "$BUILD_DIR" -type d -name 'Dropshake_DropshakeApp.bundle' -print -quit)"
-if [[ -z "$RESOURCE_BUNDLE" ]]; then
-  echo "The Dropshake Swift package resource bundle was not found in $BUILD_DIR." >&2
-  exit 1
-fi
-cp -R "$RESOURCE_BUNDLE" "$APP/Contents/Resources/"
+for resource_bundle in Dropshake_DropshakeApp.bundle KeyboardShortcuts_KeyboardShortcuts.bundle; do
+  if [[ ! -d "$ARM64_BIN_DIR/$resource_bundle" ]]; then
+    echo "Missing Swift package resource bundle: $ARM64_BIN_DIR/$resource_bundle" >&2
+    exit 1
+  fi
+  cp -R "$ARM64_BIN_DIR/$resource_bundle" "$APP/Contents/Resources/"
+done
 SPARKLE_FRAMEWORK="$(find "$BUILD_DIR" -type d -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
 if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
   echo "Sparkle.framework was not found in $BUILD_DIR; resolve the Sparkle package first." >&2
