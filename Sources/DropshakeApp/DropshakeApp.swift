@@ -1151,11 +1151,22 @@ struct ShelfView: View {
 
 private enum DropshakeBrand {
     static let appIcon: NSImage = {
-        guard let url = Bundle.module.url(forResource: "Dropshake-icon-rounded", withExtension: "png"),
-              let image = NSImage(contentsOf: url) else {
-            return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 22, height: 22))
+        let resourceName = "Dropshake-icon-rounded.png"
+        let resourceDirectory = Bundle.main.resourceURL
+        let resourceBundle = resourceDirectory?.appendingPathComponent("Dropshake_DropshakeApp.bundle")
+        let candidates = [
+            resourceBundle?.appendingPathComponent("Contents/Resources/\(resourceName)"),
+            resourceBundle?.appendingPathComponent(resourceName),
+            resourceDirectory?.appendingPathComponent(resourceName)
+        ]
+
+        for url in candidates.compactMap({ $0 }) {
+            if let image = NSImage(contentsOf: url) {
+                return image
+            }
         }
-        return image
+
+        return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 22, height: 22))
     }()
 
     static let selectionColor = Color(red: 0.67, green: 0.38, blue: 0.93)
