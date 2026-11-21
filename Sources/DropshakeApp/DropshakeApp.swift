@@ -25,6 +25,9 @@ struct DropshakeApp: App {
             Button(runtime.shakeEnabled ? "Disable Shake to Open" : "Enable Shake to Open") {
                 runtime.toggleShake()
             }
+            Button(runtime.resetItemsOnOpen ? "Disable Reset Items" : "Enable Reset Items") {
+                runtime.toggleResetItemsOnOpen()
+            }
             Divider()
             Button("Quit Dropshake") { NSApp.terminate(nil) }
         } label: {
@@ -86,10 +89,12 @@ final class DropshakeRuntime: ObservableObject {
     private let shakeDetector: ShakeDetector
     private let updaterController: SPUStandardUpdaterController?
     @Published private(set) var shakeEnabled: Bool
+    @Published private(set) var resetItemsOnOpen: Bool
     private var openShelfHotKey: EventHotKeyRef?
     private var openShelfEventHandler: EventHandlerRef?
 
     private let shakeEnabledKey = "dropshake.shakeEnabled"
+    private let resetItemsPreferenceKey = "dropshake.resetItemsOnShake"
 
     init() {
         let shelfWindow = ShelfWindowController(store: shelf)
@@ -104,19 +109,23 @@ final class DropshakeRuntime: ObservableObject {
         self.shakeDetector = shakeDetector
         self.updaterController = updaterController
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
+        self.resetItemsOnOpen = UserDefaults.standard.object(forKey: resetItemsPreferenceKey) as? Bool ?? true
         registerOpenShelfHotKey()
 
-        shakeDetector.onShake = { [weak self, weak shelfWindow] in
-            self?.shelf.clear()
-            shelfWindow?.show(near: NSEvent.mouseLocation, resetToDefaultSize: true)
+        shakeDetector.onShake = { [weak self] in
+            self?.showShelf(near: NSEvent.mouseLocation, resetToDefaultSize: true)
         }
         shakeDetector.isEnabled = shakeEnabled
         shakeDetector.start()
     }
 
     func showShelf() {
-        shelf.clear()
-        shelfWindow.show(near: nil)
+        showShelf(near: nil)
+    }
+
+    private func showShelf(near point: NSPoint?, resetToDefaultSize: Bool = false) {
+        if resetItemsOnOpen { shelf.clear() }
+        shelfWindow.show(near: point, resetToDefaultSize: resetToDefaultSize)
     }
     func hideShelf() { shelfWindow.hide() }
     func checkForUpdates() {
@@ -151,6 +160,11 @@ final class DropshakeRuntime: ObservableObject {
         shakeEnabled.toggle()
         UserDefaults.standard.set(shakeEnabled, forKey: shakeEnabledKey)
         shakeDetector.isEnabled = shakeEnabled
+    }
+
+    func toggleResetItemsOnOpen() {
+        resetItemsOnOpen.toggle()
+        UserDefaults.standard.set(resetItemsOnOpen, forKey: resetItemsPreferenceKey)
     }
 
     private func registerOpenShelfHotKey() {

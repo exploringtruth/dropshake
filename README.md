@@ -43,9 +43,11 @@ You only need to approve the installed copy. macOS may ask again after you insta
 2. Drop the file onto the shelf. Add more files as you gather them; new arrivals are selected automatically.
 3. Switch to the destination, then drag the selected file or files from the shelf into Finder or another app.
 
+Resetting items when opening the shelf is enabled by default. Choose **Disable Reset Items** in the menu bar to keep existing shelf items when you shake or press ⌘E; choose **Enable Reset Items** to restore the default behavior.
+
 Inside the shelf:
 
-- Press **⌘E** or choose **Open Shelf** from the menu bar to open an empty shelf manually.
+- Press **⌘E** or choose **Open Shelf** from the menu bar to open the shelf manually; the **Reset Items** setting controls whether existing items are cleared.
 - Search by file name or extension.
 - Shift-click to select a range, or drag across blank shelf space to marquee-select items. Click blank space to clear the selection.
 - Use **Add Clipboard Contents** in the menu bar to add clipboard items.
