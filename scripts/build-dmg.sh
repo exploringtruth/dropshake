@@ -50,7 +50,7 @@ if [[ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ]]; then
   /usr/libexec/PlistBuddy -c 'Add :SUFeedURL string https://github.com/exploringtruth/dropshake/releases/latest/download/appcast.xml' "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string $SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c 'Add :SUEnableAutomaticChecks bool true' "$APP/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c 'Add :SUAutomaticallyUpdate bool false' "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :SUAllowsAutomaticUpdates bool false' "$APP/Contents/Info.plist"
 fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"

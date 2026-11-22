@@ -1,6 +1,6 @@
 # Maintainer setup: Sparkle updates
 
-Dropshake embeds Sparkle in the app. Users do not install Sparkle separately. The first updater-enabled release must be installed manually; later releases can be installed from **Get Latest Version**.
+Dropshake embeds Sparkle in the app. By default, Sparkle checks for updates on a 24-hour schedule while Dropshake is running. When it finds a newer version, Dropshake brings the Sparkle dialog forward. Users choose whether to install, defer, or skip the update. To check immediately, open **Check for Updates** from the Dropshake menu bar icon.
 
 ## Create the signing key once
 
@@ -34,6 +34,14 @@ Never commit, paste into an issue, or print the private key in a workflow log. K
 
 ## Publishing
 
-Tag and push a release as usual. The release workflow embeds the public key and appcast URL in the app, packages a ZIP for Sparkle, signs the update feed with the Actions secret, and uploads `appcast.xml` plus the ZIP and DMGs to the GitHub release. The public feed URL is the latest release's `appcast.xml` asset.
+On a clean branch based on `origin/main`, commit the changes you want to release and run:
+
+```sh
+./scripts/release.sh
+```
+
+The script bumps the patch version in `Info.plist` and pushes the release commit and tag together. Pass an explicit version, such as `./scripts/release.sh 1.3.0`, to choose a different version. For custom release notes, commit `.github/release-notes/v<version>.md` before running the script.
+
+The release workflow embeds the public key and appcast URL in the app, packages a ZIP for Sparkle, signs the update feed with the Actions secret, and uploads `appcast.xml` plus the ZIP and DMGs to the GitHub release. The public feed URL is the latest release's `appcast.xml` asset.
 
 If either Actions setting is missing, the workflow stops before publishing. For ad-hoc builds, Sparkle cannot remove macOS Gatekeeper warnings; Apple Developer ID signing and notarization are separate from Sparkle update signing.

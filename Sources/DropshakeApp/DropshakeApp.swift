@@ -27,6 +27,10 @@ struct DropshakeApp: App {
 }
 
 private final class DropshakeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DropshakeRuntime.shared.startUpdater()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
@@ -101,33 +105,31 @@ private enum DropshakeMenuBarIcon {
 }
 
 @MainActor
-final class DropshakeRuntime: ObservableObject {
+final class DropshakeRuntime: NSObject, ObservableObject, @preconcurrency SPUStandardUserDriverDelegate {
     static let shared = DropshakeRuntime()
 
     let shelf = ShelfStore()
     private let shelfWindow: ShelfWindowController
     private let shakeDetector: ShakeDetector
-    private let updaterController: SPUStandardUpdaterController?
+    private lazy var updaterController: SPUStandardUpdaterController? = {
+        // Only packages configured with a signed feed start Sparkle.
+        guard Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") is String else { return nil }
+        return SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+    }()
     @Published private(set) var shakeEnabled: Bool
     @Published private(set) var resetItemsOnOpen: Bool
 
     private let shakeEnabledKey = "dropshake.shakeEnabled"
     private let resetItemsOnShakeKey = "dropshake.resetItemsOnShake"
 
-    init() {
+    override init() {
         let shelfWindow = ShelfWindowController(store: shelf)
         let shakeDetector = ShakeDetector()
-        // Development builds without the release signing key remain usable;
-        // Sparkle is started only in packages configured with a signed feed.
-        let hasUpdateFeed = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String != nil
-        let updaterController = hasUpdateFeed
-            ? SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
-            : nil
         self.shelfWindow = shelfWindow
         self.shakeDetector = shakeDetector
-        self.updaterController = updaterController
         self.shakeEnabled = UserDefaults.standard.object(forKey: shakeEnabledKey) as? Bool ?? true
         self.resetItemsOnOpen = UserDefaults.standard.object(forKey: resetItemsOnShakeKey) as? Bool ?? true
+        super.init()
         restoreOpenShelfDefaultIfNeeded()
         for action in ShortcutAction.allCases {
             KeyboardShortcuts.onKeyDown(for: action.shortcutName) { [weak self] in
@@ -177,6 +179,31 @@ final class DropshakeRuntime: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func startUpdater() {
+        _ = updaterController
+    }
+
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        immediateFocus
+    }
+
+    func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
+    ) {
+        guard !handleShowingUpdate, let updaterController else { return }
+
+        // A menu-bar app can be denied activation while another app is in use.
+        // Order the window Sparkle just showed forward even if DropShake stays inactive.
+        let visibleWindows = Set(NSApp.windows.filter(\.isVisible))
+        updaterController.userDriver.showUpdateInFocus()
+        let updateWindow = NSApp.windows.first { $0.isVisible && !visibleWindows.contains($0) }
+        updateWindow?.orderFrontRegardless()
+    }
+
     func checkForUpdates() {
         guard let updaterController else {
             let alert = NSAlert()
@@ -187,7 +214,9 @@ final class DropshakeRuntime: ObservableObject {
             alert.runModal()
             return
         }
-        updaterController.checkForUpdates(nil)
+        if updaterController.updater.canCheckForUpdates {
+            updaterController.checkForUpdates(nil)
+        }
     }
 
     func captureClipboard() {
