@@ -2,16 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Dropshake</string>
-    <key>CFBundleDisplayName</key><string>Dropshake</string>
-    <key>CFBundleIdentifier</key><string>com.dropshake.app</string>
-    <key>CFBundleVersion</key><string>1.2.7</string>
-    <key>CFBundleShortVersionString</key><string>1.2.7</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>LSMinimumSystemVersion</key><string>13.0</string>
-    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>LSUIElement</key><true/>
+	<key>CFBundleDisplayName</key>
+	<string>Dropshake</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.dropshake.app</string>
+	<key>CFBundleName</key>
+	<string>Dropshake</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.2.8</string>
+	<key>CFBundleVersion</key>
+	<string>1.2.8</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>
