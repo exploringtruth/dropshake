@@ -7,8 +7,7 @@ PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 
 VERSION="${VERSION:-$PLIST_VERSION}"
 APP_NAME="Dropshake"
 BUILD_DIR="$ROOT/.build"
-ARM64_BUILD_DIR="$BUILD_DIR/universal-arm64"
-X86_64_BUILD_DIR="$BUILD_DIR/universal-x86_64"
+UNIVERSAL_BUILD_DIR="$BUILD_DIR/universal"
 APP="$BUILD_DIR/$APP_NAME.app"
 DMG="$ROOT/$APP_NAME-$VERSION.dmg"
 RW_DMG="$BUILD_DIR/$APP_NAME-$VERSION-rw.dmg"
@@ -23,25 +22,27 @@ command -v lipo >/dev/null || { echo "lipo is required to build a universal app.
 
 cd "$ROOT"
 # Swift Build generates Bundle.module accessors that search Contents/Resources.
-SWIFT_BUILD_ARGS=(--build-system swiftbuild -c "$CONFIGURATION")
-swift build "${SWIFT_BUILD_ARGS[@]}" --triple arm64-apple-macosx13.0 --scratch-path "$ARM64_BUILD_DIR"
-swift build "${SWIFT_BUILD_ARGS[@]}" --triple x86_64-apple-macosx13.0 --scratch-path "$X86_64_BUILD_DIR"
-ARM64_BIN_DIR="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path --triple arm64-apple-macosx13.0 --scratch-path "$ARM64_BUILD_DIR")"
-X86_64_BIN_DIR="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path --triple x86_64-apple-macosx13.0 --scratch-path "$X86_64_BUILD_DIR")"
-lipo -create "$ARM64_BIN_DIR/$APP_NAME" "$X86_64_BIN_DIR/$APP_NAME" -output "$BUILD_DIR/$APP_NAME-universal"
-echo "Universal binary: $(lipo -archs "$BUILD_DIR/$APP_NAME-universal")"
+SWIFT_BUILD_ARGS=(--build-system swiftbuild -c "$CONFIGURATION" --arch arm64 --arch x86_64 --scratch-path "$UNIVERSAL_BUILD_DIR")
+swift build "${SWIFT_BUILD_ARGS[@]}"
+BIN_DIR="$(swift build "${SWIFT_BUILD_ARGS[@]}" --show-bin-path)"
+ARCHITECTURES="$(lipo -archs "$BIN_DIR/$APP_NAME")"
+if [[ "$ARCHITECTURES" != "x86_64 arm64" && "$ARCHITECTURES" != "arm64 x86_64" ]]; then
+  echo "Expected a universal $APP_NAME binary, found: $ARCHITECTURES" >&2
+  exit 1
+fi
+echo "Universal binary: $ARCHITECTURES"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BUILD_DIR/$APP_NAME-universal" "$APP/Contents/MacOS/$APP_NAME"
+cp "$BIN_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
 for resource_bundle in Dropshake_DropshakeApp.bundle KeyboardShortcuts_KeyboardShortcuts.bundle; do
-  if [[ ! -d "$ARM64_BIN_DIR/$resource_bundle" ]]; then
-    echo "Missing Swift package resource bundle: $ARM64_BIN_DIR/$resource_bundle" >&2
+  if [[ ! -d "$BIN_DIR/$resource_bundle" ]]; then
+    echo "Missing Swift package resource bundle: $BIN_DIR/$resource_bundle" >&2
     exit 1
   fi
-  cp -R "$ARM64_BIN_DIR/$resource_bundle" "$APP/Contents/Resources/"
+  cp -R "$BIN_DIR/$resource_bundle" "$APP/Contents/Resources/"
 done
-SPARKLE_FRAMEWORK="$(find "$BUILD_DIR" -type d -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
+SPARKLE_FRAMEWORK="$(find "$UNIVERSAL_BUILD_DIR" -type d -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -print -quit)"
 if [[ -z "$SPARKLE_FRAMEWORK" ]]; then
   echo "Sparkle.framework was not found in $BUILD_DIR; resolve the Sparkle package first." >&2
   exit 1

@@ -28,6 +28,12 @@ jobs:
             echo "Release tag must start with v (for example, v1.2.3)." >&2
             exit 1
           fi
+      - name: Use current packaging script for a manual release
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # Build the tagged app source with packaging fixes from the workflow revision.
+          git fetch --no-tags origin "$GITHUB_WORKFLOW_SHA"
+          git restore --source="$GITHUB_WORKFLOW_SHA" -- scripts/build-dmg.sh
       - name: Build app and DMG
         env:
           SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
