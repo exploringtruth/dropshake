@@ -1,6 +1,6 @@
 # Maintainer setup: Sparkle updates
 
-Dropshake embeds Sparkle in the app. By default, Sparkle checks for updates on a 24-hour schedule while Dropshake is running. When it finds a newer version, Dropshake brings the Sparkle dialog forward. Users choose whether to install, defer, or skip the update. To check immediately, open **Check for Updates** from the Dropshake menu bar icon.
+Dropshake embeds Sparkle in the app. By default, Sparkle checks for updates on a 24-hour schedule while Dropshake is running. When a check finds an update, Dropshake brings Sparkle’s install dialog to the active Space and floats it above ordinary app windows. Users choose whether to install, defer, or skip the update. To check immediately, open **Check for Updates** from the Dropshake menu bar icon.
 
 ## Create the signing key once
 

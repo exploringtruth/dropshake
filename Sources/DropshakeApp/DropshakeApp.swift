@@ -46,6 +46,7 @@ private struct MenuBarContent: View {
             }
             Button(menuTitle(for: action)) { runtime.perform(action) }
                 .globalKeyboardShortcut(action.shortcutName)
+                .disabled(action == .checkForUpdates && !runtime.canCheckForUpdates)
         }
     }
 
@@ -111,11 +112,9 @@ final class DropshakeRuntime: NSObject, ObservableObject, @preconcurrency SPUSta
     let shelf = ShelfStore()
     private let shelfWindow: ShelfWindowController
     private let shakeDetector: ShakeDetector
-    private lazy var updaterController: SPUStandardUpdaterController? = {
-        // Only packages configured with a signed feed start Sparkle.
-        guard Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") is String else { return nil }
-        return SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
-    }()
+    private var updaterController: SPUStandardUpdaterController?
+    private var updateCheckObservation: NSKeyValueObservation?
+    @Published private(set) var canCheckForUpdates = false
     @Published private(set) var shakeEnabled: Bool
     @Published private(set) var resetItemsOnOpen: Bool
 
@@ -180,7 +179,14 @@ final class DropshakeRuntime: NSObject, ObservableObject, @preconcurrency SPUSta
     }
 
     func startUpdater() {
-        _ = updaterController
+        guard updaterController == nil, Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") is String else { return }
+        let controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+        updaterController = controller
+        updateCheckObservation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
+            Task { @MainActor in
+                self?.canCheckForUpdates = updater.canCheckForUpdates
+            }
+        }
     }
 
     var supportsGentleScheduledUpdateReminders: Bool { true }
@@ -188,20 +194,29 @@ final class DropshakeRuntime: NSObject, ObservableObject, @preconcurrency SPUSta
     func standardUserDriverShouldHandleShowingScheduledUpdate(
         _ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool
     ) -> Bool {
-        immediateFocus
+        false
     }
 
     func standardUserDriverWillHandleShowingUpdate(
         _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
     ) {
-        guard !handleShowingUpdate, let updaterController else { return }
-
-        // A menu-bar app can be denied activation while another app is in use.
-        // Order the window Sparkle just showed forward even if DropShake stays inactive.
-        let visibleWindows = Set(NSApp.windows.filter(\.isVisible))
-        updaterController.userDriver.showUpdateInFocus()
-        let updateWindow = NSApp.windows.first { $0.isVisible && !visibleWindows.contains($0) }
-        updateWindow?.orderFrontRegardless()
+        // Sparkle loads its alert before the scheduled callback. For manual checks
+        // it loads and shows the window just after this callback returns.
+        let visibleBefore = Set(NSApp.windows.filter(\.isVisible))
+        if !handleShowingUpdate {
+            updaterController?.userDriver.showUpdateInFocus()
+        }
+        DispatchQueue.main.async {
+            guard let alert = NSApp.windows.first(where: {
+                guard $0.isVisible, let controller = $0.windowController else { return false }
+                return !visibleBefore.contains($0)
+                    && Bundle(for: type(of: controller)) == Bundle(for: SPUStandardUpdaterController.self)
+            }) else { return }
+            alert.collectionBehavior.formUnion([.moveToActiveSpace, .fullScreenAuxiliary, .canJoinAllApplications])
+            alert.level = .floating
+            alert.makeKeyAndOrderFront(nil)
+            alert.orderFrontRegardless()
+        }
     }
 
     func checkForUpdates() {
