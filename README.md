@@ -4,8 +4,8 @@
   <p align="center">A temporary shelf for files you want to move later.</p>
   <p align="center">
     <a href="https://github.com/exploringtruth/dropshake/releases/latest"><img src="https://badgen.net/github/release/exploringtruth/dropshake/stable" alt="Latest release"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/exploringtruth/dropshake?label=license" alt="GPL-3.0-or-later license"></a>
-    <img src="docs/badges/macos-13-plus.svg?v=2" alt="Requires macOS 13 or later">
+    <a href="LICENSE"><img src="https://badgen.net/static/license/GPL-3.0/orange" alt="GPL-3.0-or-later license"></a>
+    <img src="https://badgen.net/static/macOS/13%2B/269b26" alt="Requires macOS 13 or later">
   </p>
   <p align="center">
     <a href="https://github.com/exploringtruth/dropshake/releases/latest/download/Dropshake.dmg"><strong>Download the DMG</strong></a>
